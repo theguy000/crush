@@ -276,10 +276,11 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 				return util.CmdHandler(SwitchSessionsMsg{})
 			},
 		},
-		{
+{
 			ID:          "switch_model",
 			Title:       "Switch Model",
 			Description: "Switch to a different model",
+			Shortcut:    "ctrl+m",
 			Handler: func(cmd Command) tea.Cmd {
 				return util.CmdHandler(SwitchModelMsg{})
 			},
