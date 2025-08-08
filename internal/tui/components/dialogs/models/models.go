@@ -117,28 +117,28 @@ case tea.WindowSizeMsg:
 		switch {
 		case key.Matches(msg, m.keyMap.EditAPIKey):
 			selectedItem := m.modelList.SelectedModel()
-			if m.isProviderConfigured(string(selectedItem.Provider.ID)) {
-				var modelType config.SelectedModelType
-				if m.modelList.GetModelType() == LargeModelType {
-					modelType = config.SelectedModelTypeLarge
-				} else {
-					modelType = config.SelectedModelTypeSmall
-				}
-m.needsAPIKey = true
-				m.selectedModel = selectedItem
-				m.selectedModelType = modelType
-				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
-				m.apiKeyInput.SetTitle("API Key Configuration")
-				m.keyMap.isAPIKeyHelp = true
-				m.keyMap.isAPIKeyValid = false
+			var modelType config.SelectedModelType
+			if m.modelList.GetModelType() == LargeModelType {
+				modelType = config.SelectedModelTypeLarge
+			} else {
+				modelType = config.SelectedModelTypeSmall
+			}
+			// Always open the API key input, even if the provider is not yet configured
+			m.needsAPIKey = true
+			m.selectedModel = selectedItem
+			m.selectedModelType = modelType
+			m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+			m.apiKeyInput.SetTitle("API Key Configuration")
+			m.keyMap.isAPIKeyHelp = true
+			m.keyMap.isAPIKeyValid = false
 
-				provider, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID))
-				if ok {
-					apiKey, _ := config.Get().Resolver().ResolveValue(provider.APIKey)
+			// Prefill existing API key if present
+			if provider, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID)); ok {
+				if apiKey, _ := config.Get().Resolver().ResolveValue(provider.APIKey); apiKey != "" {
 					m.apiKeyInput.SetValue(apiKey)
 				}
-				return m, nil
 			}
+			return m, nil
 		case key.Matches(msg, m.keyMap.Select):
 			if m.isAPIKeyValid {
 				return m, m.saveAPIKeyAndContinue(m.apiKeyValue)
