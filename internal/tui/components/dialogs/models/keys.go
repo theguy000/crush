@@ -7,6 +7,7 @@ import (
 type KeyMap struct {
 	Select,
 	EditAPIKey,
+	DeleteAPIKey,
 	Next,
 	Previous,
 	Tab,
@@ -25,6 +26,10 @@ func DefaultKeyMap() KeyMap {
 		EditAPIKey: key.NewBinding(
 			key.WithKeys("ctrl+enter"),
 			key.WithHelp("ctrl+enter", "edit api key"),
+		),
+		DeleteAPIKey: key.NewBinding(
+			key.WithKeys("ctrl+d", "delete", "del"),
+			key.WithHelp("ctrl+d/delete", "delete api key"),
 		),
 		Next: key.NewBinding(
 			key.WithKeys("down", "ctrl+n"),
@@ -50,6 +55,7 @@ func (k KeyMap) KeyBindings() []key.Binding {
 	return []key.Binding{
 		k.Select,
 		k.EditAPIKey,
+		k.DeleteAPIKey,
 		k.Next,
 		k.Previous,
 		k.Tab,
@@ -72,6 +78,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 func (k KeyMap) ShortHelp() []key.Binding {
 	if k.isAPIKeyHelp && !k.isAPIKeyValid {
 		return []key.Binding{
+			k.DeleteAPIKey,
 			k.Close,
 		}
 	} else if k.isAPIKeyValid {
@@ -90,6 +97,8 @@ func (k KeyMap) ShortHelp() []key.Binding {
 	}
 	if !k.isAPIKeyHelp {
 		help = append(help, k.EditAPIKey)
+	} else {
+		help = append(help, k.DeleteAPIKey)
 	}
 	return help
 }
