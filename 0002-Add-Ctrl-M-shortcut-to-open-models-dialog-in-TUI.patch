@@ -1,0 +1,89 @@
+From 7789f08a16dfb8c32a71c3258881ca110d751e97 Mon Sep 17 00:00:00 2001
+From: theguy000 <istiakm30@gmail.com>
+Date: Fri, 8 Aug 2025 07:20:02 +0600
+Subject: [PATCH 2/4] Add Ctrl+M shortcut to open models dialog in TUI
+
+- Introduce a new key binding (Ctrl+M) for switching models via the models dialog.
+- Update key map and command definitions to include the shortcut.
+- Implement handler in appModel to open/close the models dialog with the new shortcut.
+- Improves accessibility and discoverability of model switching.
+---
+ .../components/dialogs/commands/commands.go   |  3 ++-
+ internal/tui/keys.go                          |  5 +++++
+ internal/tui/tui.go                           | 22 +++++++++++++++++++
+ 3 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/internal/tui/components/dialogs/commands/commands.go b/internal/tui/components/dialogs/commands/commands.go
+index 139ec1ea..33706751 100644
+--- a/internal/tui/components/dialogs/commands/commands.go
++++ b/internal/tui/components/dialogs/commands/commands.go
+@@ -275,10 +275,11 @@ func (c *commandDialogCmp) defaultCommands() []Command {
+				return util.CmdHandler(SwitchSessionsMsg{})
+			},
+		},
+-		{
++{
+			ID:          "switch_model",
+			Title:       "Switch Model",
+			Description: "Switch to a different model",
++			Shortcut:    "ctrl+m",
+			Handler: func(cmd Command) tea.Cmd {
+				return util.CmdHandler(SwitchModelMsg{})
+			},
+diff --git a/internal/tui/keys.go b/internal/tui/keys.go
+index d618063e..96e6f260 100644
+--- a/internal/tui/keys.go
++++ b/internal/tui/keys.go
+@@ -10,6 +10,7 @@ type KeyMap struct {
+	Commands key.Binding
+	Suspend  key.Binding
+	Sessions key.Binding
++	Models   key.Binding
+
+	pageBindings []key.Binding
+ }
+@@ -36,5 +37,9 @@ func DefaultKeyMap() KeyMap {
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("ctrl+s", "sessions"),
+		),
++		Models: key.NewBinding(
++			key.WithKeys("ctrl+m"),
++			key.WithHelp("ctrl+m", "models"),
++		),
+	}
+ }
+diff --git a/internal/tui/tui.go b/internal/tui/tui.go
+index 60f10de2..5791b852 100644
+--- a/internal/tui/tui.go
++++ b/internal/tui/tui.go
+@@ -392,6 +392,28 @@ func (a *appModel) handleKeyPressMsg(msg tea.KeyPressMsg) tea.Cmd {
+			},
+		)
+		return tea.Sequence(cmds...)
++	case key.Matches(msg, a.keyMap.Models):
++		// if the app is not configured show no models
++		if !a.isConfigured {
++			return nil
++		}
++		if a.dialog.ActiveDialogID() == models.ModelsDialogID {
++			return util.CmdHandler(dialogs.CloseDialogMsg{})
++		}
++		if a.dialog.HasDialogs() && a.dialog.ActiveDialogID() != commands.CommandsDialogID {
++			return nil
++		}
++		var cmdsModels []tea.Cmd
++		if a.dialog.ActiveDialogID() == commands.CommandsDialogID {
++			// If the commands dialog is open, close it first
++			cmdsModels = append(cmdsModels, util.CmdHandler(dialogs.CloseDialogMsg{}))
++		}
++		cmdsModels = append(cmdsModels,
++			util.CmdHandler(dialogs.OpenDialogMsg{
++				Model: models.NewModelDialogCmp(),
++			}),
++		)
++		return tea.Sequence(cmdsModels...)
+	case key.Matches(msg, a.keyMap.Suspend):
+		if a.app.CoderAgent != nil && a.app.CoderAgent.IsBusy() {
+			return util.ReportWarn("Agent is busy, please wait...")
+--
+2.50.1

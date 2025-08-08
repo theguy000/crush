@@ -1,0 +1,216 @@
+From f33c30d349118870e5e7070b852f7968c9ab30da Mon Sep 17 00:00:00 2001
+From: theguy000 <istiakm30@gmail.com>
+Date: Fri, 8 Aug 2025 07:09:40 +0600
+Subject: [PATCH 1/4] Switch ripgrep to JSON output and add Edit API Key
+ keybinding
+
+- Update rg.go and grep.go to use ripgrep's --json output for robust parsing across platforms, avoiding path parsing issues (e.g., Windows drive letters)
+- Refactor grep.go to parse JSON output from ripgrep instead of colon-delimited text
+- Add SetValue and SetTitle methods to APIKeyInput for improved API key dialog control
+- Introduce EditAPIKey keybinding (ctrl+enter) in keys.go and integrate into key help
+- Begin handling EditAPIKey action in model dialog component for future API key editing support
+---
+ internal/llm/tools/grep.go                    | 36 ++++++++++++-------
+ internal/llm/tools/rg.go                      |  4 +--
+ .../tui/components/dialogs/models/apikey.go   |  8 +++++
+ .../tui/components/dialogs/models/keys.go     | 12 ++++++-
+ .../tui/components/dialogs/models/models.go   | 23 ++++++++++++
+ 5 files changed, 68 insertions(+), 15 deletions(-)
+
+diff --git a/internal/llm/tools/grep.go b/internal/llm/tools/grep.go
+index 4d0fbd75..f3a50c60 100644
+--- a/internal/llm/tools/grep.go
++++ b/internal/llm/tools/grep.go
+@@ -11,7 +11,6 @@ import (
+	"path/filepath"
+	"regexp"
+	"sort"
+-	"strconv"
+	"strings"
+	"sync"
+	"time"
+@@ -293,26 +292,39 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
+		return nil, err
+	}
+
++	type rgJSONPath struct {
++		Text string `json:"text"`
++	}
++	type rgJSONLines struct {
++		Text string `json:"text"`
++	}
++	type rgJSONData struct {
++		Path       rgJSONPath  `json:"path"`
++		Lines      rgJSONLines `json:"lines"`
++		LineNumber int         `json:"line_number"`
++	}
++	type rgJSON struct {
++		Type string     `json:"type"`
++		Data rgJSONData `json:"data"`
++	}
++
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	matches := make([]grepMatch, 0, len(lines))
+
+	for _, line := range lines {
+-		if line == "" {
++		if strings.TrimSpace(line) == "" {
+			continue
+		}
+-
+-		// Parse ripgrep output format: file:line:content
+-		parts := strings.SplitN(line, ":", 3)
+-		if len(parts) < 3 {
++		var rec rgJSON
++		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+-
+-		filePath := parts[0]
+-		lineNum, err := strconv.Atoi(parts[1])
+-		if err != nil {
++		if rec.Type != "match" {
+			continue
+		}
+-		lineText := parts[2]
++		filePath := rec.Data.Path.Text
++		lineNum := rec.Data.LineNumber
++		lineText := rec.Data.Lines.Text
+
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
+@@ -323,7 +335,7 @@ func searchWithRipgrep(ctx context.Context, pattern, path, include string) ([]gr
+			path:     filePath,
+			modTime:  fileInfo.ModTime(),
+			lineNum:  lineNum,
+-			lineText: lineText,
++			lineText: strings.TrimRight(lineText, "\r\n"),
+		})
+	}
+
+diff --git a/internal/llm/tools/rg.go b/internal/llm/tools/rg.go
+index 40ab7f2f..a87101a7 100644
+--- a/internal/llm/tools/rg.go
++++ b/internal/llm/tools/rg.go
+@@ -42,8 +42,8 @@ func getRgSearchCmd(ctx context.Context, pattern, path, include string) *exec.Cm
+	if name == "" {
+		return nil
+	}
+-	// Use -n to show line numbers and include the matched line
+-	args := []string{"-H", "-n", pattern}
++	// Use JSON output to avoid platform-specific path parsing issues (e.g., Windows drive letters)
++	args := []string{"--json", "-n", "-H", pattern}
+	if include != "" {
+		args = append(args, "--glob", include)
+	}
+diff --git a/internal/tui/components/dialogs/models/apikey.go b/internal/tui/components/dialogs/models/apikey.go
+index 10378ead..6c11ee25 100644
+--- a/internal/tui/components/dialogs/models/apikey.go
++++ b/internal/tui/components/dialogs/models/apikey.go
+@@ -57,6 +57,14 @@ func NewAPIKeyInput() *APIKeyInput {
+	}
+ }
+
++func (a *APIKeyInput) SetValue(value string) {
++	a.input.SetValue(value)
++}
++
++func (a *APIKeyInput) SetTitle(title string) {
++	a.title = title
++}
++
+ func (a *APIKeyInput) SetProviderName(name string) {
+	a.providerName = name
+	a.updateStatePresentation()
+diff --git a/internal/tui/components/dialogs/models/keys.go b/internal/tui/components/dialogs/models/keys.go
+index df546863..0e5033b7 100644
+--- a/internal/tui/components/dialogs/models/keys.go
++++ b/internal/tui/components/dialogs/models/keys.go
+@@ -6,6 +6,7 @@ import (
+
+ type KeyMap struct {
+	Select,
++	EditAPIKey,
+	Next,
+	Previous,
+	Tab,
+@@ -21,6 +22,10 @@ func DefaultKeyMap() KeyMap {
+			key.WithKeys("enter", "ctrl+y"),
+			key.WithHelp("enter", "confirm"),
+		),
++		EditAPIKey: key.NewBinding(
++			key.WithKeys("ctrl+enter"),
++			key.WithHelp("ctrl+enter", "edit api key"),
++		),
+		Next: key.NewBinding(
+			key.WithKeys("down", "ctrl+n"),
+			key.WithHelp("↓", "next item"),
+@@ -44,6 +49,7 @@ func DefaultKeyMap() KeyMap {
+ func (k KeyMap) KeyBindings() []key.Binding {
+	return []key.Binding{
+		k.Select,
++		k.EditAPIKey,
+		k.Next,
+		k.Previous,
+		k.Tab,
+@@ -73,7 +79,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
+			k.Select,
+		}
+	}
+-	return []key.Binding{
++	help := []key.Binding{
+		key.NewBinding(
+			key.WithKeys("down", "up"),
+			key.WithHelp("↑↓", "choose"),
+@@ -82,4 +88,8 @@ func (k KeyMap) ShortHelp() []key.Binding {
+		k.Select,
+		k.Close,
+	}
++	if !k.isAPIKeyHelp {
++		help = append(help, k.EditAPIKey)
++	}
++	return help
+ }
+diff --git a/internal/tui/components/dialogs/models/models.go b/internal/tui/components/dialogs/models/models.go
+index e09b040a..d316350f 100644
+--- a/internal/tui/components/dialogs/models/models.go
++++ b/internal/tui/components/dialogs/models/models.go
+@@ -112,6 +112,28 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+		return m, cmd
+	case tea.KeyPressMsg:
+		switch {
++		case key.Matches(msg, m.keyMap.EditAPIKey):
++			selectedItem := m.modelList.SelectedModel()
++			if m.isProviderConfigured(string(selectedItem.Provider.ID)) {
++				var modelType config.SelectedModelType
++				if m.modelList.GetModelType() == LargeModelType {
++					modelType = config.SelectedModelTypeLarge
++				} else {
++					modelType = config.SelectedModelTypeSmall
++				}
++				m.needsAPIKey = true
++				m.selectedModel = selectedItem
++				m.selectedModelType = modelType
++				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
++				m.apiKeyInput.SetTitle("API Key Configuration")
++
++				provider, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID))
++				if ok {
++					apiKey, _ := config.Get().Resolver().ResolveValue(provider.APIKey)
++					m.apiKeyInput.SetValue(apiKey)
++				}
++				return m, nil
++			}
+		case key.Matches(msg, m.keyMap.Select):
+			if m.isAPIKeyValid {
+				return m, m.saveAPIKeyAndContinue(m.apiKeyValue)
+@@ -208,6 +230,7 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+				m.isAPIKeyValid = false
+				m.apiKeyValue = ""
+				m.apiKeyInput.Reset()
++				m.apiKeyInput.SetTitle("API Key")
+				return m, nil
+			}
+			return m, util.CmdHandler(dialogs.CloseDialogMsg{})
+--
+2.50.1

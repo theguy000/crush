@@ -1,0 +1,65 @@
+From 56fbcfe48eabc61e9fa034587f5d752612190e67 Mon Sep 17 00:00:00 2001
+From: theguy000 <istiakm30@gmail.com>
+Date: Fri, 8 Aug 2025 16:27:00 +0600
+Subject: [PATCH 4/4] Always open API key input for model selection, prefill if
+ available
+
+Refactor logic to always show the API key input dialog when editing a model, regardless of provider configuration status. Prefill the input with an existing API key if present. This improves user experience by allowing API key entry or update at any time.
+---
+ .../tui/components/dialogs/models/models.go   | 38 +++++++++----------
+ 1 file changed, 19 insertions(+), 19 deletions(-)
+
+diff --git a/internal/tui/components/dialogs/models/models.go b/internal/tui/components/dialogs/models/models.go
+index ada05ced..d139b2c1 100644
+--- a/internal/tui/components/dialogs/models/models.go
++++ b/internal/tui/components/dialogs/models/models.go
+@@ -117,28 +117,28 @@ case tea.WindowSizeMsg:
+		switch {
+		case key.Matches(msg, m.keyMap.EditAPIKey):
+			selectedItem := m.modelList.SelectedModel()
+-			if m.isProviderConfigured(string(selectedItem.Provider.ID)) {
+-				var modelType config.SelectedModelType
+-				if m.modelList.GetModelType() == LargeModelType {
+-					modelType = config.SelectedModelTypeLarge
+-				} else {
+-					modelType = config.SelectedModelTypeSmall
+-				}
+-m.needsAPIKey = true
+-				m.selectedModel = selectedItem
+-				m.selectedModelType = modelType
+-				m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
+-				m.apiKeyInput.SetTitle("API Key Configuration")
+-				m.keyMap.isAPIKeyHelp = true
+-				m.keyMap.isAPIKeyValid = false
+-
+-				provider, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID))
+-				if ok {
+-					apiKey, _ := config.Get().Resolver().ResolveValue(provider.APIKey)
++			var modelType config.SelectedModelType
++			if m.modelList.GetModelType() == LargeModelType {
++				modelType = config.SelectedModelTypeLarge
++			} else {
++				modelType = config.SelectedModelTypeSmall
++			}
++			// Always open the API key input, even if the provider is not yet configured
++			m.needsAPIKey = true
++			m.selectedModel = selectedItem
++			m.selectedModelType = modelType
++			m.apiKeyInput.SetProviderName(selectedItem.Provider.Name)
++			m.apiKeyInput.SetTitle("API Key Configuration")
++			m.keyMap.isAPIKeyHelp = true
++			m.keyMap.isAPIKeyValid = false
++
++			// Prefill existing API key if present
++			if provider, ok := config.Get().Providers.Get(string(selectedItem.Provider.ID)); ok {
++				if apiKey, _ := config.Get().Resolver().ResolveValue(provider.APIKey); apiKey != "" {
+					m.apiKeyInput.SetValue(apiKey)
+				}
+-				return m, nil
+			}
++			return m, nil
+		case key.Matches(msg, m.keyMap.Select):
+			if m.isAPIKeyValid {
+				return m, m.saveAPIKeyAndContinue(m.apiKeyValue)
+--
+2.50.1
