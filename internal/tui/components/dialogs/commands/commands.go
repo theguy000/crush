@@ -276,7 +276,7 @@ func (c *commandDialogCmp) defaultCommands() []Command {
 				return util.CmdHandler(SwitchSessionsMsg{})
 			},
 		},
-{
+		{
 			ID:          "switch_model",
 			Title:       "Switch Model",
 			Description: "Switch to a different model",
