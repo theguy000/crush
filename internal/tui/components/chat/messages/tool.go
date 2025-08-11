@@ -548,9 +548,22 @@ func (m *toolCallCmp) formatWriteResultForCopy() string {
 		return m.result.Content
 	}
 
+	// Try to get the actual content from metadata first
+	var meta tools.WriteResponseMetadata
+	var actualContent string
+	var actualFilePath string
+	if json.Unmarshal([]byte(m.result.Metadata), &meta) == nil && meta.NewContent != "" {
+		actualContent = meta.NewContent
+		actualFilePath = meta.FilePath
+	} else {
+		// Fall back to original params if metadata is not available
+		actualContent = params.Content
+		actualFilePath = params.FilePath
+	}
+
 	lang := ""
-	if params.FilePath != "" {
-		ext := strings.ToLower(filepath.Ext(params.FilePath))
+	if actualFilePath != "" {
+		ext := strings.ToLower(filepath.Ext(actualFilePath))
 		switch ext {
 		case ".go":
 			lang = "go"
@@ -586,13 +599,13 @@ func (m *toolCallCmp) formatWriteResultForCopy() string {
 	}
 
 	var result strings.Builder
-	result.WriteString(fmt.Sprintf("File: %s\n", fsext.PrettyPath(params.FilePath)))
+	result.WriteString(fmt.Sprintf("File: %s\n", fsext.PrettyPath(actualFilePath)))
 	if lang != "" {
 		result.WriteString(fmt.Sprintf("```%s\n", lang))
 	} else {
 		result.WriteString("```\n")
 	}
-	result.WriteString(params.Content)
+	result.WriteString(actualContent)
 	result.WriteString("\n```")
 
 	return result.String()

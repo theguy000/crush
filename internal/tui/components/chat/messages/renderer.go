@@ -388,6 +388,12 @@ func (wr writeRenderer) Render(v *toolCallCmp) string {
 	}
 
 	return wr.renderWithParams(v, "Write", args, func() string {
+		// Try to get the actual content from metadata first
+		var meta tools.WriteResponseMetadata
+		if err := wr.unmarshalParams(v.result.Metadata, &meta); err == nil && meta.NewContent != "" {
+			return renderCodeContent(v, meta.FilePath, meta.NewContent, 0)
+		}
+		// Fall back to original params if metadata is not available
 		return renderCodeContent(v, file, params.Content, 0)
 	})
 }

@@ -37,9 +37,12 @@ type writeTool struct {
 }
 
 type WriteResponseMetadata struct {
-	Diff      string `json:"diff"`
-	Additions int    `json:"additions"`
-	Removals  int    `json:"removals"`
+	Diff       string `json:"diff"`
+	Additions  int    `json:"additions"`
+	Removals   int    `json:"removals"`
+	FilePath   string `json:"file_path"`
+	OldContent string `json:"old_content"`
+	NewContent string `json:"new_content"`
 }
 
 const (
@@ -167,13 +170,7 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		return ToolResponse{}, fmt.Errorf("session_id and message_id are required")
 	}
 
-	diff, additions, removals := diff.GenerateDiff(
-		oldContent,
-		params.Content,
-		strings.TrimPrefix(filePath, w.workingDir),
-	)
-
-	p := w.permissions.Request(
+	updatedPermission, granted := w.permissions.RequestWithUpdatedParams(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        fsext.PathOrPrefix(filePath, w.workingDir),
@@ -188,11 +185,19 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 			},
 		},
 	)
-	if !p {
+	if !granted {
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	err = os.WriteFile(filePath, []byte(params.Content), 0o644)
+	// Use the updated content if the permission was modified
+	contentToWrite := params.Content
+	if updatedPermission != nil {
+		if updatedParams, ok := updatedPermission.Params.(WritePermissionsParams); ok {
+			contentToWrite = updatedParams.NewContent
+		}
+	}
+
+	err = os.WriteFile(filePath, []byte(contentToWrite), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("error writing file: %w", err)
 	}
@@ -214,7 +219,7 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 		}
 	}
 	// Store the new version
-	_, err = w.files.CreateVersion(ctx, sessionID, filePath, params.Content)
+	_, err = w.files.CreateVersion(ctx, sessionID, filePath, contentToWrite)
 	if err != nil {
 		slog.Debug("Error creating file history version", "error", err)
 	}
@@ -223,14 +228,24 @@ func (w *writeTool) Run(ctx context.Context, call ToolCall) (ToolResponse, error
 	recordFileRead(filePath)
 	waitForLspDiagnostics(ctx, filePath, w.lspClients)
 
+	// Generate diff with the actual content that was written
+	actualDiff, actualAdditions, actualRemovals := diff.GenerateDiff(
+		oldContent,
+		contentToWrite,
+		strings.TrimPrefix(filePath, w.workingDir),
+	)
+
 	result := fmt.Sprintf("File successfully written: %s", filePath)
 	result = fmt.Sprintf("<result>\n%s\n</result>", result)
 	result += getDiagnostics(filePath, w.lspClients)
 	return WithResponseMetadata(NewTextResponse(result),
 		WriteResponseMetadata{
-			Diff:      diff,
-			Additions: additions,
-			Removals:  removals,
+			Diff:       actualDiff,
+			Additions:  actualAdditions,
+			Removals:   actualRemovals,
+			FilePath:   filePath,
+			OldContent: oldContent,
+			NewContent: contentToWrite,
 		},
 	), nil
 }
