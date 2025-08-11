@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/textarea"
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/fsext"
@@ -57,6 +58,14 @@ type permissionDialogCmp struct {
 	diffXOffset          int   // horizontal scroll offset
 	diffYOffset          int   // vertical scroll offset
 
+	// Edit mode state
+	editing         bool
+	editor          *textarea.Model
+	editedContent   string // current edited new content
+	focusArea       int    // 0 = content, 1 = buttons (when editing)
+	editSelectedIdx int    // 0 = Save, 1 = Cancel
+	contentStartOff int    // cached vertical offset (lines) to the content area within the dialog
+
 	// Caching
 	cachedContent string
 	contentDirty  bool
@@ -100,12 +109,74 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := p.SetSize()
 		cmds = append(cmds, cmd)
 	case tea.KeyPressMsg:
+		// Edit mode handling for diff-supporting tools
+		if p.editing && p.supportsDiffView() {
+			switch {
+			case key.Matches(msg, p.keyMap.ShiftTab):
+				// Toggle focus between editor (content) and buttons using Shift+Tab
+				if p.focusArea == 0 {
+					p.focusArea = 1
+					if p.editor != nil {
+						p.editor.Blur()
+					}
+				} else {
+					p.focusArea = 0
+					if p.editor != nil {
+						p.editor.Focus()
+					}
+				}
+				return p, nil
+			}
+			if p.focusArea == 1 {
+				switch {
+				case key.Matches(msg, p.keyMap.CancelEdit):
+					p.cancelEdit()
+					return p, nil
+				case key.Matches(msg, p.keyMap.SaveEdit): // 's' shortcut
+					return p, p.saveEditedContent()
+				case key.Matches(msg, p.keyMap.Left), key.Matches(msg, p.keyMap.Right), key.Matches(msg, p.keyMap.Tab):
+					p.editSelectedIdx = (p.editSelectedIdx + 1) % 2 // Save/Cancel
+					return p, nil
+				case key.Matches(msg, p.keyMap.Select):
+					switch p.editSelectedIdx {
+					case 0:
+						return p, p.saveEditedContent()
+					case 1:
+						p.cancelEdit()
+						return p, nil
+					}
+					return p, nil
+
+				}
+			}
+
+			if p.editor != nil && p.focusArea == 0 {
+				if msg.String() == "tab" {
+					p.editor.InsertString("\t")
+					return p, nil
+				}
+				ed, cmd := p.editor.Update(msg)
+				p.editor = ed
+				return p, cmd
+			}
+			return p, nil
+		}
+
 		switch {
-		case key.Matches(msg, p.keyMap.Right) || key.Matches(msg, p.keyMap.Tab):
-			p.selectedOption = (p.selectedOption + 1) % 3
+		case key.Matches(msg, p.keyMap.Right):
+			maxOptions := 3
+			if p.supportsDiffView() { maxOptions = 4 }
+			p.selectedOption = (p.selectedOption + 1) % maxOptions
+			return p, nil
+		case key.Matches(msg, p.keyMap.Tab):
+			maxOptions := 3
+			if p.supportsDiffView() { maxOptions = 4 }
+			p.selectedOption = (p.selectedOption + 1) % maxOptions
 			return p, nil
 		case key.Matches(msg, p.keyMap.Left):
-			p.selectedOption = (p.selectedOption + 2) % 3
+			maxOptions := 3
+			if p.supportsDiffView() { maxOptions = 4 }
+			p.selectedOption = (p.selectedOption + maxOptions - 1) % maxOptions
 		case key.Matches(msg, p.keyMap.Select):
 			return p, p.selectCurrentOption()
 		case key.Matches(msg, p.keyMap.Allow):
@@ -123,6 +194,8 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(dialogs.CloseDialogMsg{}),
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionDeny, Permission: p.permission}),
 			)
+		case key.Matches(msg, p.keyMap.EditToggle):
+			if p.supportsDiffView() { p.toggleEditMode(); return p, nil }
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):
 			if p.supportsDiffView() {
 				if p.diffSplitMode == nil {
@@ -223,6 +296,12 @@ func (p *permissionDialogCmp) selectCurrentOption() tea.Cmd {
 		action = PermissionAllowForSession
 	case 2:
 		action = PermissionDeny
+	case 3:
+		if p.supportsDiffView() {
+			p.toggleEditMode()
+			return nil
+		}
+		return nil
 	}
 
 	return tea.Batch(
@@ -235,22 +314,23 @@ func (p *permissionDialogCmp) renderButtons() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base
 
+	// Edit mode buttons for diff-supporting tools
+	if p.editing && p.supportsDiffView() {
+		buttons := []core.ButtonOpts{
+			{Text: "Save", UnderlineIndex: 0, Selected: p.focusArea == 1 && p.editSelectedIdx == 0},
+			{Text: "Cancel", UnderlineIndex: 0, Selected: p.focusArea == 1 && p.editSelectedIdx == 1},
+		}
+		return baseStyle.AlignHorizontal(lipgloss.Right).Width(p.width - 4).Render(core.SelectableButtons(buttons, "  "))
+	}
+
 	buttons := []core.ButtonOpts{
-		{
-			Text:           "Allow",
-			UnderlineIndex: 0, // "A"
-			Selected:       p.selectedOption == 0,
-		},
-		{
-			Text:           "Allow for Session",
-			UnderlineIndex: 10, // "S" in "Session"
-			Selected:       p.selectedOption == 1,
-		},
-		{
-			Text:           "Deny",
-			UnderlineIndex: 0, // "D"
-			Selected:       p.selectedOption == 2,
-		},
+		{Text: "Allow", UnderlineIndex: 0, Selected: p.selectedOption == 0},
+		{Text: "Allow for Session", UnderlineIndex: 10, Selected: p.selectedOption == 1},
+		{Text: "Deny", UnderlineIndex: 0, Selected: p.selectedOption == 2},
+	}
+
+	if p.supportsDiffView() {
+		buttons = append(buttons, core.ButtonOpts{Text: "Edit", UnderlineIndex: 0, Selected: p.selectedOption == 3})
 	}
 
 	content := core.SelectableButtons(buttons, "  ")
@@ -470,9 +550,13 @@ func (p *permissionDialogCmp) generateBashContent() string {
 
 func (p *permissionDialogCmp) generateEditContent() string {
 	if pr, ok := p.permission.Params.(tools.EditPermissionsParams); ok {
+		newContent := pr.NewContent
+		if p.editedContent != "" {
+			newContent = p.editedContent
+		}
 		formatter := core.DiffFormatter().
 			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
-			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+			After(fsext.PrettyPath(pr.FilePath), newContent).
 			Height(p.contentViewPort.Height()).
 			Width(p.contentViewPort.Width()).
 			XOffset(p.diffXOffset).
@@ -491,10 +575,13 @@ func (p *permissionDialogCmp) generateEditContent() string {
 
 func (p *permissionDialogCmp) generateWriteContent() string {
 	if pr, ok := p.permission.Params.(tools.WritePermissionsParams); ok {
-		// Use the cache for diff rendering
+		newContent := pr.NewContent
+		if p.editedContent != "" {
+			newContent = p.editedContent
+		}
 		formatter := core.DiffFormatter().
 			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
-			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+			After(fsext.PrettyPath(pr.FilePath), newContent).
 			Height(p.contentViewPort.Height()).
 			Width(p.contentViewPort.Width()).
 			XOffset(p.diffXOffset).
@@ -531,10 +618,13 @@ func (p *permissionDialogCmp) generateDownloadContent() string {
 
 func (p *permissionDialogCmp) generateMultiEditContent() string {
 	if pr, ok := p.permission.Params.(tools.MultiEditPermissionsParams); ok {
-		// Use the cache for diff rendering
+		newContent := pr.NewContent
+		if p.editedContent != "" {
+			newContent = p.editedContent
+		}
 		formatter := core.DiffFormatter().
 			Before(fsext.PrettyPath(pr.FilePath), pr.OldContent).
-			After(fsext.PrettyPath(pr.FilePath), pr.NewContent).
+			After(fsext.PrettyPath(pr.FilePath), newContent).
 			Height(p.contentViewPort.Height()).
 			Width(p.contentViewPort.Width()).
 			XOffset(p.diffXOffset).
@@ -650,13 +740,20 @@ func (p *permissionDialogCmp) useDiffSplitMode() bool {
 
 func (p *permissionDialogCmp) styleViewport() string {
 	t := styles.CurrentTheme()
+	if p.editing && p.supportsDiffView() && p.editor != nil {
+		return t.S().Base.Render(p.renderDiffHighlightedEditor())
+	}
 	return t.S().Base.Render(p.contentViewPort.View())
 }
 
 func (p *permissionDialogCmp) render() string {
 	t := styles.CurrentTheme()
 	baseStyle := t.S().Base
-	title := core.Title("Permission Required", p.width-4)
+	titleText := "Permission Required"
+	if p.editing && p.supportsDiffView() {
+		titleText = "Permission Required - EDIT MODE"
+	}
+	title := core.Title(titleText, p.width-4)
 	// Render header
 	headerContent := p.renderHeader()
 	// Render buttons
@@ -676,12 +773,23 @@ func (p *permissionDialogCmp) render() string {
 	p.contentViewPort.SetHeight(contentHeight)
 	p.contentViewPort.SetContent(contentFinal)
 
+	// Also set up editor if in edit mode
+	if p.editing && p.supportsDiffView() {
+		if p.editor == nil { p.initEditor() }
+		p.editor.SetWidth(p.width - 4)
+		// Set editor height to minimum 6 lines for better editing experience
+		editorHeight := max(6, contentHeight)
+		p.editor.SetHeight(editorHeight)
+	}
+
 	p.positionRow = p.wHeight / 2
 	p.positionRow -= (contentHeight + 9) / 2
 	p.positionRow -= 3 // Move dialog slightly higher than middle
 
 	var contentHelp string
-	if p.supportsDiffView() {
+	if p.editing && p.supportsDiffView() {
+		contentHelp = help.New().View(p.editModeKeyMap())
+	} else if p.supportsDiffView() {
 		contentHelp = help.New().View(p.keyMap)
 	}
 
@@ -695,6 +803,8 @@ func (p *permissionDialogCmp) render() string {
 		buttons,
 		"",
 	}
+	// Cache the starting offset to the content area for cursor positioning
+	p.contentStartOff = 1 + 1 + lipgloss.Height(headerContent) // title + blank + header
 	if contentHelp != "" {
 		strs = append(strs, "", contentHelp)
 	}
@@ -788,4 +898,186 @@ func (p *permissionDialogCmp) ID() dialogs.DialogID {
 // Position implements PermissionDialogCmp.
 func (p *permissionDialogCmp) Position() (int, int) {
 	return p.positionRow, p.positionCol
+}
+
+// currentNewContent returns the current new content based on the tool's params.
+func (p *permissionDialogCmp) currentNewContent() string {
+	switch p.permission.ToolName {
+	case tools.EditToolName:
+		params := p.permission.Params.(tools.EditPermissionsParams)
+		return params.NewContent
+	case tools.WriteToolName:
+		params := p.permission.Params.(tools.WritePermissionsParams)
+		return params.NewContent
+	case tools.MultiEditToolName:
+		params := p.permission.Params.(tools.MultiEditPermissionsParams)
+		return params.NewContent
+	default:
+		return ""
+	}
+}
+
+// currentOldContent returns the current old content based on the tool's params.
+func (p *permissionDialogCmp) currentOldContent() string {
+	switch p.permission.ToolName {
+	case tools.EditToolName:
+		params := p.permission.Params.(tools.EditPermissionsParams)
+		return params.OldContent
+	case tools.WriteToolName:
+		params := p.permission.Params.(tools.WritePermissionsParams)
+		return params.OldContent
+	case tools.MultiEditToolName:
+		params := p.permission.Params.(tools.MultiEditPermissionsParams)
+		return params.OldContent
+	default:
+		return ""
+	}
+}
+
+// toggleEditMode initializes or exits the edit mode, preparing the textarea with the proposed new content.
+func (p *permissionDialogCmp) toggleEditMode() {
+	if !p.supportsDiffView() {
+		return
+	}
+	p.editing = !p.editing
+	if p.editing {
+		p.initEditor()
+	} else {
+		p.editor = nil
+	}
+	p.contentDirty = true
+}
+
+func (p *permissionDialogCmp) initEditor() {
+	if p.editor == nil {
+		ta := textarea.New()
+		ta.SetStyles(styles.CurrentTheme().S().TextArea)
+		ta.ShowLineNumbers = false
+		ta.CharLimit = -1
+		ta.SetVirtualCursor(false)
+		// Seed the editor with the proposed new content
+		ta.SetValue(p.currentNewContent())
+		p.editor = ta
+	}
+	p.focusArea = 0
+	if p.editor != nil {
+		p.editor.Focus()
+	}
+}
+
+// saveEditedContent stores the edited content and returns to diff view to show the updated diff.
+func (p *permissionDialogCmp) saveEditedContent() tea.Cmd {
+	if p.editor == nil {
+		return nil
+	}
+	p.editedContent = p.editor.Value()
+	// Write back into params so the diff shows the updated content
+	switch p.permission.ToolName {
+	case tools.EditToolName:
+		params := p.permission.Params.(tools.EditPermissionsParams)
+		params.NewContent = p.editedContent
+		p.permission.Params = params
+	case tools.WriteToolName:
+		params := p.permission.Params.(tools.WritePermissionsParams)
+		params.NewContent = p.editedContent
+		p.permission.Params = params
+	case tools.MultiEditToolName:
+		params := p.permission.Params.(tools.MultiEditPermissionsParams)
+		params.NewContent = p.editedContent
+		p.permission.Params = params
+	}
+	// Exit edit mode and return to diff view with updated content
+	p.editing = false
+	p.focusArea = 0
+	p.editSelectedIdx = 0
+	p.editor = nil
+	p.contentDirty = true
+	return nil
+}
+
+func (p *permissionDialogCmp) cancelEdit() {
+	p.editing = false
+	p.focusArea = 0
+	p.editSelectedIdx = 0
+	p.editor = nil
+	p.editedContent = ""
+	p.contentDirty = true
+}
+
+// renderDiffHighlightedEditor renders the editor content with diff highlighting
+func (p *permissionDialogCmp) renderDiffHighlightedEditor() string {
+	if p.editor == nil {
+		return ""
+	}
+	oldContent := p.currentOldContent()
+	currentContent := p.editor.Value()
+	p.applyDiffStylesToEditor(oldContent, currentContent)
+	return p.editor.View()
+}
+
+// applyDiffStylesToEditor modifies the textarea styles to show diff highlighting
+func (p *permissionDialogCmp) applyDiffStylesToEditor(oldContent, currentContent string) {
+	if p.editor == nil {
+		return
+	}
+	theme := styles.CurrentTheme()
+	lines := strings.Split(currentContent, "\n")
+	oldLines := strings.Split(oldContent, "\n")
+	textAreaStyles := theme.S().TextArea
+	modifiedLines := 0
+	for i, line := range lines {
+		if i >= len(oldLines) || (i < len(oldLines) && oldLines[i] != line) {
+			modifiedLines++
+		}
+	}
+	if modifiedLines > len(lines)/2 {
+		textAreaStyles.Focused.Base = textAreaStyles.Focused.Base.Background(lipgloss.Color("#323931"))
+		textAreaStyles.Focused.CursorLine = textAreaStyles.Focused.CursorLine.Background(lipgloss.Color("#2b322a"))
+		textAreaStyles.Blurred.Base = textAreaStyles.Blurred.Base.Background(lipgloss.Color("#323931"))
+	} else {
+		textAreaStyles.Focused.Base = textAreaStyles.Focused.Base.Background(lipgloss.Color("#2b322a"))
+		textAreaStyles.Focused.CursorLine = textAreaStyles.Focused.CursorLine.Background(lipgloss.Color("#232a23"))
+		textAreaStyles.Blurred.Base = textAreaStyles.Blurred.Base.Background(lipgloss.Color("#2b322a"))
+	}
+	p.editor.SetStyles(textAreaStyles)
+}
+
+// Cursor places the text cursor over the editor when editing and focused on content
+func (p *permissionDialogCmp) Cursor() *tea.Cursor {
+	if !p.editing || !p.supportsDiffView() || p.editor == nil || p.focusArea != 0 {
+		return nil
+	}
+	cur := p.editor.Cursor()
+	if cur == nil {
+		return nil
+	}
+	// Align cursor to dialog position accounting for border and horizontal padding
+	row, col := p.Position()
+	cur.Y = cur.Y + row + 1 + p.contentStartOff
+	cur.X = cur.X + col + 2
+	return cur
+}
+
+// editModeKeyMap returns a keymap with only the Shift+Tab instruction for edit mode
+func (p *permissionDialogCmp) editModeKeyMap() *editModeKeyMapWrapper {
+	return &editModeKeyMapWrapper{
+		shiftTab: p.keyMap.ShiftTab,
+	}
+}
+
+// editModeKeyMapWrapper is a custom keymap for edit mode that only shows shift+tab help
+type editModeKeyMapWrapper struct {
+	shiftTab key.Binding
+}
+
+func (e *editModeKeyMapWrapper) KeyBindings() []key.Binding {
+	return []key.Binding{e.shiftTab}
+}
+
+func (e *editModeKeyMapWrapper) FullHelp() [][]key.Binding {
+	return [][]key.Binding{{e.shiftTab}}
+}
+
+func (e *editModeKeyMapWrapper) ShortHelp() []key.Binding {
+	return []key.Binding{e.shiftTab}
 }

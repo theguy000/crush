@@ -17,6 +17,10 @@ type KeyMap struct {
 	ScrollUp key.Binding
 	ScrollLeft,
 	ScrollRight key.Binding
+	ShiftTab,
+	EditToggle,
+	SaveEdit,
+	CancelEdit key.Binding
 }
 
 func DefaultKeyMap() KeyMap {
@@ -68,6 +72,22 @@ func DefaultKeyMap() KeyMap {
 		ScrollRight: key.NewBinding(
 			key.WithKeys("shift+right", "L"),
 			key.WithHelp("shift+→", "scroll right"),
+		),
+		ShiftTab: key.NewBinding(
+			key.WithKeys("shift+tab"),
+			key.WithHelp("shift+tab", "change focus"),
+		),
+		EditToggle: key.NewBinding(
+			key.WithKeys("e", "E"),
+			key.WithHelp("e", "toggle edit"),
+		),
+		SaveEdit: key.NewBinding(
+			key.WithKeys("s", "S"),
+			key.WithHelp("s", "save edit"),
+		),
+		CancelEdit: key.NewBinding(
+			key.WithKeys("c", "C", "esc"),
+			key.WithHelp("c/esc", "cancel edit"),
 		),
 	}
 }
