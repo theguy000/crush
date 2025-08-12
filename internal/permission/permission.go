@@ -139,22 +139,15 @@ func (s *permissionService) Deny(permission PermissionRequest) {
 	}
 }
 
-func (s *permissionService) Request(opts CreatePermissionRequest) bool {
+func (s *permissionService) preflightPermissionChecks(opts CreatePermissionRequest) (*PermissionRequest, bool) {
 	if s.skip {
-		return true
+		return nil, true
 	}
-
-	// tell the UI that a permission was requested
-	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
-		ToolCallID: opts.ToolCallID,
-	})
-	s.requestMu.Lock()
-	defer s.requestMu.Unlock()
 
 	// Check if the tool/action combination is in the allowlist
 	commandKey := opts.ToolName + ":" + opts.Action
 	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
-		return true
+		return nil, true
 	}
 
 	s.autoApproveSessionsMu.RLock()
@@ -162,7 +155,7 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	s.autoApproveSessionsMu.RUnlock()
 
 	if autoApprove {
-		return true
+		return nil, true
 	}
 
 	fileInfo, err := os.Stat(opts.Path)
@@ -178,7 +171,16 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 	if dir == "." {
 		dir = s.workingDir
 	}
-	permission := PermissionRequest{
+	s.sessionPermissionsMu.RLock()
+	for _, p := range s.sessionPermissions {
+		if p.ToolName == opts.ToolName && p.Action == opts.Action && p.SessionID == opts.SessionID && p.Path == dir {
+			s.sessionPermissionsMu.RUnlock()
+			return nil, true
+		}
+	}
+	s.sessionPermissionsMu.RUnlock()
+
+	permission := &PermissionRequest{
 		ID:          uuid.New().String(),
 		Path:        dir,
 		SessionID:   opts.SessionID,
@@ -189,41 +191,35 @@ func (s *permissionService) Request(opts CreatePermissionRequest) bool {
 		Params:      opts.Params,
 	}
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
+	return permission, false
+}
 
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return true
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
+func (s *permissionService) Request(opts CreatePermissionRequest) bool {
+	// tell the UI that a permission was requested
+	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
+		ToolCallID: opts.ToolCallID,
+	})
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
 
-	s.activeRequest = &permission
+	permission, granted := s.preflightPermissionChecks(opts)
+	if granted {
+		return true
+	}
+
+	s.activeRequest = permission
 
 	respCh := make(chan bool, 1)
 	s.pendingRequests.Set(permission.ID, respCh)
 	defer s.pendingRequests.Del(permission.ID)
 
 	// Publish the request
-	s.Publish(pubsub.CreatedEvent, permission)
+	s.Publish(pubsub.CreatedEvent, *permission)
 
 	return <-respCh
 }
 
 func (s *permissionService) RequestWithUpdatedParams(opts CreatePermissionRequest) (*PermissionRequest, bool) {
-	if s.skip {
-		return nil, true
-	}
-
 	// tell the UI that a permission was requested
 	s.notificationBroker.Publish(pubsub.CreatedEvent, PermissionNotification{
 		ToolCallID: opts.ToolCallID,
@@ -231,70 +227,19 @@ func (s *permissionService) RequestWithUpdatedParams(opts CreatePermissionReques
 	s.requestMu.Lock()
 	defer s.requestMu.Unlock()
 
-	// Check if the tool/action combination is in the allowlist
-	commandKey := opts.ToolName + ":" + opts.Action
-	if slices.Contains(s.allowedTools, commandKey) || slices.Contains(s.allowedTools, opts.ToolName) {
+	permission, granted := s.preflightPermissionChecks(opts)
+	if granted {
 		return nil, true
 	}
 
-	s.autoApproveSessionsMu.RLock()
-	autoApprove := s.autoApproveSessions[opts.SessionID]
-	s.autoApproveSessionsMu.RUnlock()
-
-	if autoApprove {
-		return nil, true
-	}
-
-	fileInfo, err := os.Stat(opts.Path)
-	dir := opts.Path
-	if err == nil {
-		if fileInfo.IsDir() {
-			dir = opts.Path
-		} else {
-			dir = filepath.Dir(opts.Path)
-		}
-	}
-
-	if dir == "." {
-		dir = s.workingDir
-	}
-	permission := PermissionRequest{
-		ID:          uuid.New().String(),
-		Path:        dir,
-		SessionID:   opts.SessionID,
-		ToolCallID:  opts.ToolCallID,
-		ToolName:    opts.ToolName,
-		Description: opts.Description,
-		Action:      opts.Action,
-		Params:      opts.Params,
-	}
-
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return nil, true
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
-
-	s.sessionPermissionsMu.RLock()
-	for _, p := range s.sessionPermissions {
-		if p.ToolName == permission.ToolName && p.Action == permission.Action && p.SessionID == permission.SessionID && p.Path == permission.Path {
-			s.sessionPermissionsMu.RUnlock()
-			return nil, true
-		}
-	}
-	s.sessionPermissionsMu.RUnlock()
-
-	s.activeRequest = &permission
+	s.activeRequest = permission
 
 	respChWithParams := make(chan *PermissionRequest, 1)
 	s.pendingRequestsWithParams.Set(permission.ID, respChWithParams)
 	defer s.pendingRequestsWithParams.Del(permission.ID)
 
 	// Publish the request
-	s.Publish(pubsub.CreatedEvent, permission)
+	s.Publish(pubsub.CreatedEvent, *permission)
 
 	updatedPermission := <-respChWithParams
 	return updatedPermission, updatedPermission != nil
