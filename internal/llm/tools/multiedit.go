@@ -35,8 +35,10 @@ type MultiEditPermissionsParams struct {
 }
 
 type MultiEditResponseMetadata struct {
+	Diff         string `json:"diff"`
 	Additions    int    `json:"additions"`
 	Removals     int    `json:"removals"`
+	FilePath     string `json:"file_path"`
 	OldContent   string `json:"old_content,omitempty"`
 	NewContent   string `json:"new_content,omitempty"`
 	EditsApplied int    `json:"edits_applied"`
@@ -249,9 +251,7 @@ func (m *multiEditTool) processMultiEditWithCreation(ctx context.Context, params
 	}
 
 	// Check permissions
-	_, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
-
-	p := m.permissions.Request(permission.CreatePermissionRequest{
+	updatedPermission, granted := m.permissions.RequestWithUpdatedParams(permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, m.workingDir),
 		ToolCallID:  call.ID,
@@ -264,12 +264,20 @@ func (m *multiEditTool) processMultiEditWithCreation(ctx context.Context, params
 			NewContent: currentContent,
 		},
 	})
-	if !p {
+	if !granted {
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
+	// Use the updated content if the permission was modified
+	contentToWrite := currentContent
+	if updatedPermission != nil {
+		if updatedParams, ok := updatedPermission.Params.(MultiEditPermissionsParams); ok {
+			contentToWrite = updatedParams.NewContent
+		}
+	}
+
 	// Write the file
-	err := os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
+	err := os.WriteFile(params.FilePath, []byte(contentToWrite), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -280,7 +288,7 @@ func (m *multiEditTool) processMultiEditWithCreation(ctx context.Context, params
 		return ToolResponse{}, fmt.Errorf("error creating file history: %w", err)
 	}
 
-	_, err = m.files.CreateVersion(ctx, sessionID, params.FilePath, currentContent)
+	_, err = m.files.CreateVersion(ctx, sessionID, params.FilePath, contentToWrite)
 	if err != nil {
 		slog.Debug("Error creating file history version", "error", err)
 	}
@@ -288,13 +296,22 @@ func (m *multiEditTool) processMultiEditWithCreation(ctx context.Context, params
 	recordFileWrite(params.FilePath)
 	recordFileRead(params.FilePath)
 
+	// Generate diff with the actual content that was written
+	actualDiff, actualAdditions, actualRemovals := diff.GenerateDiff(
+		"",
+		contentToWrite,
+		strings.TrimPrefix(params.FilePath, m.workingDir),
+	)
+
 	return WithResponseMetadata(
 		NewTextResponse(fmt.Sprintf("File created with %d edits: %s", len(params.Edits), params.FilePath)),
 		MultiEditResponseMetadata{
+			Diff:         actualDiff,
+			Additions:    actualAdditions,
+			Removals:     actualRemovals,
+			FilePath:     params.FilePath,
 			OldContent:   "",
-			NewContent:   currentContent,
-			Additions:    additions,
-			Removals:     removals,
+			NewContent:   contentToWrite,
 			EditsApplied: len(params.Edits),
 		},
 	), nil
@@ -359,8 +376,7 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 	}
 
 	// Generate diff and check permissions
-	_, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
-	p := m.permissions.Request(permission.CreatePermissionRequest{
+	updatedPermission, granted := m.permissions.RequestWithUpdatedParams(permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, m.workingDir),
 		ToolCallID:  call.ID,
@@ -373,12 +389,20 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 			NewContent: currentContent,
 		},
 	})
-	if !p {
+	if !granted {
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
+	// Use the updated content if the permission was modified
+	contentToWrite := currentContent
+	if updatedPermission != nil {
+		if updatedParams, ok := updatedPermission.Params.(MultiEditPermissionsParams); ok {
+			contentToWrite = updatedParams.NewContent
+		}
+	}
+
 	// Write the updated content
-	err = os.WriteFile(params.FilePath, []byte(currentContent), 0o644)
+	err = os.WriteFile(params.FilePath, []byte(contentToWrite), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -400,7 +424,7 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 	}
 
 	// Store the new version
-	_, err = m.files.CreateVersion(ctx, sessionID, params.FilePath, currentContent)
+	_, err = m.files.CreateVersion(ctx, sessionID, params.FilePath, contentToWrite)
 	if err != nil {
 		slog.Debug("Error creating file history version", "error", err)
 	}
@@ -408,13 +432,22 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 	recordFileWrite(params.FilePath)
 	recordFileRead(params.FilePath)
 
+	// Generate diff with the actual content that was written
+	actualDiff, actualAdditions, actualRemovals := diff.GenerateDiff(
+		oldContent,
+		contentToWrite,
+		strings.TrimPrefix(params.FilePath, m.workingDir),
+	)
+
 	return WithResponseMetadata(
 		NewTextResponse(fmt.Sprintf("Applied %d edits to file: %s", len(params.Edits), params.FilePath)),
 		MultiEditResponseMetadata{
+			Diff:         actualDiff,
+			Additions:    actualAdditions,
+			Removals:     actualRemovals,
+			FilePath:     params.FilePath,
 			OldContent:   oldContent,
-			NewContent:   currentContent,
-			Additions:    additions,
-			Removals:     removals,
+			NewContent:   contentToWrite,
 			EditsApplied: len(params.Edits),
 		},
 	), nil

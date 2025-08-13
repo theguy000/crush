@@ -165,17 +165,23 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, p.keyMap.Right):
 			maxOptions := 3
-			if p.supportsDiffView() { maxOptions = 4 }
+			if p.supportsDiffView() {
+				maxOptions = 4
+			}
 			p.selectedOption = (p.selectedOption + 1) % maxOptions
 			return p, nil
 		case key.Matches(msg, p.keyMap.Tab):
 			maxOptions := 3
-			if p.supportsDiffView() { maxOptions = 4 }
+			if p.supportsDiffView() {
+				maxOptions = 4
+			}
 			p.selectedOption = (p.selectedOption + 1) % maxOptions
 			return p, nil
 		case key.Matches(msg, p.keyMap.Left):
 			maxOptions := 3
-			if p.supportsDiffView() { maxOptions = 4 }
+			if p.supportsDiffView() {
+				maxOptions = 4
+			}
 			p.selectedOption = (p.selectedOption + maxOptions - 1) % maxOptions
 		case key.Matches(msg, p.keyMap.Select):
 			return p, p.selectCurrentOption()
@@ -195,7 +201,10 @@ func (p *permissionDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				util.CmdHandler(PermissionResponseMsg{Action: PermissionDeny, Permission: p.permission}),
 			)
 		case key.Matches(msg, p.keyMap.EditToggle):
-			if p.supportsDiffView() { p.toggleEditMode(); return p, nil }
+			if p.supportsDiffView() {
+				p.toggleEditMode()
+				return p, nil
+			}
 		case key.Matches(msg, p.keyMap.ToggleDiffMode):
 			if p.supportsDiffView() {
 				if p.diffSplitMode == nil {
@@ -775,7 +784,9 @@ func (p *permissionDialogCmp) render() string {
 
 	// Also set up editor if in edit mode
 	if p.editing && p.supportsDiffView() {
-		if p.editor == nil { p.initEditor() }
+		if p.editor == nil {
+			p.initEditor()
+		}
 		p.editor.SetWidth(p.width - 4)
 		// Set editor height to minimum 6 lines for better editing experience
 		editorHeight := max(6, contentHeight)
@@ -975,16 +986,25 @@ func (p *permissionDialogCmp) saveEditedContent() tea.Cmd {
 	switch p.permission.ToolName {
 	case tools.EditToolName:
 		params := p.permission.Params.(tools.EditPermissionsParams)
-		params.NewContent = p.editedContent
-		p.permission.Params = params
+		p.permission.Params = tools.EditPermissionsParams{
+			FilePath:   params.FilePath,
+			OldContent: params.OldContent,
+			NewContent: p.editedContent,
+		}
 	case tools.WriteToolName:
 		params := p.permission.Params.(tools.WritePermissionsParams)
-		params.NewContent = p.editedContent
-		p.permission.Params = params
+		p.permission.Params = tools.WritePermissionsParams{
+			FilePath:   params.FilePath,
+			OldContent: params.OldContent,
+			NewContent: p.editedContent,
+		}
 	case tools.MultiEditToolName:
 		params := p.permission.Params.(tools.MultiEditPermissionsParams)
-		params.NewContent = p.editedContent
-		p.permission.Params = params
+		p.permission.Params = tools.MultiEditPermissionsParams{
+			FilePath:   params.FilePath,
+			OldContent: params.OldContent,
+			NewContent: p.editedContent,
+		}
 	}
 	// Exit edit mode and return to diff view with updated content
 	p.editing = false
