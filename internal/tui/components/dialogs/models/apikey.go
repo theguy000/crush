@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -87,6 +89,21 @@ func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}()
 
 	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		// Intercept Ctrl+V before it reaches textinput to prevent crashes
+		if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+v"))) {
+			return a.handleSafePaste()
+		}
+		
+		// Also handle alternative paste shortcuts that might work better on Linux
+		if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+shift+v"))) || 
+		   key.Matches(msg, key.NewBinding(key.WithKeys("shift+insert"))) {
+			return a.handleSafePaste()
+		}
+		
+		// Let other key events pass through to textinput
+		return a.updateTextInput(msg)
+		
 	case spinner.TickMsg:
 		if a.state == APIKeyInputStateVerifying {
 			var cmd tea.Cmd
@@ -104,17 +121,91 @@ func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.updateStatePresentation()
 		return a, cmd
 	case tea.PasteMsg:
-		// Special handling for paste messages to prevent crashes
-		// Validate input focus state before processing paste
-		slog.Debug("Processing paste message in API key input", "hasValue", a.input.Value() != "")
-
-		// Ensure the input is properly focused before attempting paste
-		if a.state == APIKeyInputStateInitial || a.state == APIKeyInputStateError {
-			a.input.Focus()
-		}
+		// Handle paste messages safely - this is a fallback
+		return a.handlePasteMsg(msg)
+	default:
+		// Handle all other messages safely
+		return a.updateTextInput(msg)
 	}
+}
 
-	// Safely update the underlying text input with error recovery
+// handleSafePaste safely handles paste operations without crashing
+func (a *APIKeyInput) handleSafePaste() (tea.Model, tea.Cmd) {
+	slog.Debug("Handling safe paste operation in API key input")
+	
+	// Only allow paste in states where input is editable
+	if a.state != APIKeyInputStateInitial && a.state != APIKeyInputStateError {
+		slog.Debug("Paste ignored - input not in editable state", "state", a.state)
+		return a, nil
+	}
+	
+	// Ensure input is focused
+	a.input.Focus()
+	
+	// Safely read from clipboard with error handling
+	clipboardContent, err := func() (string, error) {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Clipboard read panic", "error", r)
+			}
+		}()
+		return clipboard.ReadAll()
+	}()
+	
+	if err != nil {
+		slog.Error("Failed to read clipboard", "error", err)
+		// Show user-friendly message but don't crash
+		return a, nil
+	}
+	
+	// Sanitize clipboard content (remove newlines, trim spaces)
+	clipboardContent = strings.TrimSpace(strings.ReplaceAll(clipboardContent, "\n", ""))
+	
+	if clipboardContent == "" {
+		slog.Debug("Clipboard is empty or contains only whitespace")
+		return a, nil
+	}
+	
+	slog.Debug("Successfully read from clipboard", "length", len(clipboardContent))
+	
+	// Safely set the value in textinput
+	currentValue := a.input.Value()
+	cursorPos := a.input.Position()
+	
+	// Insert clipboard content at cursor position
+	newValue := currentValue[:cursorPos] + clipboardContent + currentValue[cursorPos:]
+	a.input.SetValue(newValue)
+	
+	// Move cursor to end of pasted content
+	a.input.SetPosition(cursorPos + len(clipboardContent))
+	
+	return a, nil
+}
+
+// handlePasteMsg handles tea.PasteMsg safely
+func (a *APIKeyInput) handlePasteMsg(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	slog.Debug("Processing paste message in API key input", "hasValue", a.input.Value() != "")
+	
+	// Validate input focus state before processing paste
+	if a.state == APIKeyInputStateInitial || a.state == APIKeyInputStateError {
+		a.input.Focus()
+	}
+	
+	// Try to use the paste message content directly
+	pasteContent := strings.TrimSpace(strings.ReplaceAll(string(msg), "\n", ""))
+	if pasteContent != "" {
+		currentValue := a.input.Value()
+		cursorPos := a.input.Position()
+		newValue := currentValue[:cursorPos] + pasteContent + currentValue[cursorPos:]
+		a.input.SetValue(newValue)
+		a.input.SetPosition(cursorPos + len(pasteContent))
+	}
+	
+	return a, nil
+}
+
+// updateTextInput safely updates the underlying text input
+func (a *APIKeyInput) updateTextInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	func() {
 		defer func() {
@@ -125,7 +216,7 @@ func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}()
 		a.input, cmd = a.input.Update(msg)
 	}()
-
+	
 	return a, cmd
 }
 
