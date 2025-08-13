@@ -213,12 +213,12 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string, 
 		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
 	}
 
-	generatedDiff, additions, removals := diff.GenerateDiff(
+	_, _, _ = diff.GenerateDiff(
 		"",
 		content,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
-	p := e.permissions.Request(
+	updatedPermission, granted := e.permissions.RequestWithUpdatedParams(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
@@ -233,11 +233,19 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string, 
 			},
 		},
 	)
-	if !p {
+	if !granted {
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	err = os.WriteFile(filePath, []byte(content), 0o644)
+	// Use the updated content if the permission was modified
+	contentToWrite := content
+	if updatedPermission != nil {
+		if updatedParams, ok := updatedPermission.Params.(EditPermissionsParams); ok {
+			contentToWrite = updatedParams.NewContent
+		}
+	}
+
+	err = os.WriteFile(filePath, []byte(contentToWrite), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -250,7 +258,7 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string, 
 	}
 
 	// Add the new content to the file history
-	_, err = e.files.CreateVersion(ctx, sessionID, filePath, content)
+	_, err = e.files.CreateVersion(ctx, sessionID, filePath, contentToWrite)
 	if err != nil {
 		// Log error but don't fail the operation
 		slog.Debug("Error creating file history version", "error", err)
@@ -259,15 +267,22 @@ func (e *editTool) createNewFile(ctx context.Context, filePath, content string, 
 	recordFileWrite(filePath)
 	recordFileRead(filePath)
 
+	// Generate diff with the actual content that was written
+	actualDiff, actualAdditions, actualRemovals := diff.GenerateDiff(
+		"",
+		contentToWrite,
+		strings.TrimPrefix(filePath, e.workingDir),
+	)
+
 	return WithResponseMetadata(
 		NewTextResponse("File created: "+filePath),
 		EditResponseMetadata{
-			Diff:       generatedDiff,
-			Additions:  additions,
-			Removals:   removals,
+			Diff:       actualDiff,
+			Additions:  actualAdditions,
+			Removals:   actualRemovals,
 			FilePath:   filePath,
 			OldContent: "",
-			NewContent: content,
+			NewContent: contentToWrite,
 		},
 	), nil
 }
@@ -335,13 +350,13 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
 	}
 
-	generatedDiff, additions, removals := diff.GenerateDiff(
+	_, _, _ = diff.GenerateDiff(
 		oldContent,
 		newContent,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
 
-	p := e.permissions.Request(
+	updatedPermission, granted := e.permissions.RequestWithUpdatedParams(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
@@ -356,11 +371,19 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 			},
 		},
 	)
-	if !p {
+	if !granted {
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	err = os.WriteFile(filePath, []byte(newContent), 0o644)
+	// Use the updated content if the permission was modified
+	contentToWrite := newContent
+	if updatedPermission != nil {
+		if updatedParams, ok := updatedPermission.Params.(EditPermissionsParams); ok {
+			contentToWrite = updatedParams.NewContent
+		}
+	}
+
+	err = os.WriteFile(filePath, []byte(contentToWrite), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -382,7 +405,7 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 		}
 	}
 	// Store the new version
-	_, err = e.files.CreateVersion(ctx, sessionID, filePath, "")
+	_, err = e.files.CreateVersion(ctx, sessionID, filePath, contentToWrite)
 	if err != nil {
 		slog.Debug("Error creating file history version", "error", err)
 	}
@@ -390,15 +413,22 @@ func (e *editTool) deleteContent(ctx context.Context, filePath, oldString string
 	recordFileWrite(filePath)
 	recordFileRead(filePath)
 
+	// Generate diff with the actual content that was written
+	actualDiff, actualAdditions, actualRemovals := diff.GenerateDiff(
+		oldContent,
+		contentToWrite,
+		strings.TrimPrefix(filePath, e.workingDir),
+	)
+
 	return WithResponseMetadata(
 		NewTextResponse("Content deleted from file: "+filePath),
 		EditResponseMetadata{
-			Diff:       generatedDiff,
-			Additions:  additions,
-			Removals:   removals,
+			Diff:       actualDiff,
+			Additions:  actualAdditions,
+			Removals:   actualRemovals,
 			FilePath:   filePath,
 			OldContent: oldContent,
-			NewContent: newContent,
+			NewContent: contentToWrite,
 		},
 	), nil
 }
@@ -468,13 +498,13 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	if sessionID == "" || messageID == "" {
 		return ToolResponse{}, fmt.Errorf("session ID and message ID are required for creating a new file")
 	}
-	generatedDiff, additions, removals := diff.GenerateDiff(
+	_, _, _ = diff.GenerateDiff(
 		oldContent,
 		newContent,
 		strings.TrimPrefix(filePath, e.workingDir),
 	)
 
-	p := e.permissions.Request(
+	updatedPermission, granted := e.permissions.RequestWithUpdatedParams(
 		permission.CreatePermissionRequest{
 			SessionID:   sessionID,
 			Path:        fsext.PathOrPrefix(filePath, e.workingDir),
@@ -489,11 +519,19 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 			},
 		},
 	)
-	if !p {
+	if !granted {
 		return ToolResponse{}, permission.ErrorPermissionDenied
 	}
 
-	err = os.WriteFile(filePath, []byte(newContent), 0o644)
+	// Use the updated content if the permission was modified
+	contentToWrite := newContent
+	if updatedPermission != nil {
+		if updatedParams, ok := updatedPermission.Params.(EditPermissionsParams); ok {
+			contentToWrite = updatedParams.NewContent
+		}
+	}
+
+	err = os.WriteFile(filePath, []byte(contentToWrite), 0o644)
 	if err != nil {
 		return ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
 	}
@@ -515,7 +553,7 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 		}
 	}
 	// Store the new version
-	_, err = e.files.CreateVersion(ctx, sessionID, filePath, newContent)
+	_, err = e.files.CreateVersion(ctx, sessionID, filePath, contentToWrite)
 	if err != nil {
 		slog.Debug("Error creating file history version", "error", err)
 	}
@@ -523,14 +561,21 @@ func (e *editTool) replaceContent(ctx context.Context, filePath, oldString, newS
 	recordFileWrite(filePath)
 	recordFileRead(filePath)
 
+	// Generate diff with the actual content that was written
+	actualDiff, actualAdditions, actualRemovals := diff.GenerateDiff(
+		oldContent,
+		contentToWrite,
+		strings.TrimPrefix(filePath, e.workingDir),
+	)
+
 	return WithResponseMetadata(
 		NewTextResponse("Content replaced in file: "+filePath),
 		EditResponseMetadata{
-			Diff:       generatedDiff,
-			Additions:  additions,
-			Removals:   removals,
+			Diff:       actualDiff,
+			Additions:  actualAdditions,
+			Removals:   actualRemovals,
 			FilePath:   filePath,
 			OldContent: oldContent,
-			NewContent: newContent,
+			NewContent: contentToWrite,
 		}), nil
 }
