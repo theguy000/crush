@@ -130,6 +130,20 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 		
 	case tea.KeyPressMsg:
+		// CRITICAL: Intercept all clipboard operations at dialog level to prevent freeze
+		if m.needsAPIKey {
+			// Block ALL clipboard-related keys that could cause freeze
+			if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+v"))) ||
+			   key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+shift+v"))) ||
+			   key.Matches(msg, key.NewBinding(key.WithKeys("shift+insert"))) {
+				slog.Warn("Intercepting clipboard operation at dialog level to prevent freeze")
+				// Delegate to safe paste handler in APIKeyInput
+				u, cmd := m.apiKeyInput.Update(msg)
+				m.apiKeyInput = u.(*APIKeyInput)
+				return m, cmd
+			}
+		}
+		
 		switch {
 		case key.Matches(msg, m.keyMap.Select):
 			if m.isAPIKeyValid {

@@ -93,6 +93,9 @@ func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}()
 
+	// CRITICAL: Log all message types to trace freeze path
+	slog.Debug("APIKeyInput.Update called", "msgType", fmt.Sprintf("%T", msg), "focused", a.focused)
+
 	switch msg := msg.(type) {
 	case tea.FocusMsg:
 		// Handle focus gained
@@ -105,7 +108,7 @@ func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.BlurMsg:
 		// Handle focus lost
 		a.focused = false
-		slog.Debug("API key input lost focus")
+		slog.Warn("API key input lost focus - this could cause freeze on next paste")
 		// Don't blur the input immediately to prevent clipboard freeze
 		return a, nil
 		
@@ -114,18 +117,24 @@ func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.focused = true
 		a.lastFocusTime = time.Now()
 		
-		// Intercept Ctrl+V before it reaches textinput to prevent freeze
+		// CRITICAL: Log clipboard key detection
 		if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+v"))) {
+			slog.Warn("CTRL+V detected in APIKeyInput - routing to safe handler")
 			return a.handleSafePaste()
 		}
 		
-		// Also handle alternative paste shortcuts that might work better on Linux
-		if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+shift+v"))) || 
-		   key.Matches(msg, key.NewBinding(key.WithKeys("shift+insert"))) {
+		if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+shift+v"))) {
+			slog.Warn("CTRL+SHIFT+V detected in APIKeyInput - routing to safe handler")
+			return a.handleSafePaste()
+		}
+		
+		if key.Matches(msg, key.NewBinding(key.WithKeys("shift+insert"))) {
+			slog.Warn("SHIFT+INSERT detected in APIKeyInput - routing to safe handler")
 			return a.handleSafePaste()
 		}
 		
 		// Let other key events pass through to textinput
+		slog.Debug("Non-clipboard key event, passing to textinput", "key", msg.String())
 		return a.updateTextInput(msg)
 		
 	case spinner.TickMsg:
@@ -146,36 +155,45 @@ func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	case tea.PasteMsg:
 		// Handle paste messages safely - this is a fallback
+		slog.Warn("tea.PasteMsg received - routing to safe handler")
 		return a.handlePasteMsg(msg)
 	default:
 		// Handle all other messages safely
+		slog.Debug("Other message type, passing to textinput", "msgType", fmt.Sprintf("%T", msg))
 		return a.updateTextInput(msg)
 	}
 }
 
 // handleSafePaste safely handles paste operations without freezing
 func (a *APIKeyInput) handleSafePaste() (tea.Model, tea.Cmd) {
-	slog.Debug("Handling safe paste operation in API key input", "focused", a.focused)
+	slog.Warn("=== SAFE PASTE HANDLER CALLED ===", "focused", a.focused, "state", a.state)
 	
 	// Only allow paste in states where input is editable
 	if a.state != APIKeyInputStateInitial && a.state != APIKeyInputStateError {
-		slog.Debug("Paste ignored - input not in editable state", "state", a.state)
+		slog.Warn("Paste ignored - input not in editable state", "state", a.state)
 		return a, nil
 	}
 	
 	// Check if we have recent focus - prevent freeze from focus loss
 	timeSinceFocus := time.Since(a.lastFocusTime)
+	slog.Warn("Focus check", "focused", a.focused, "timeSinceFocus", timeSinceFocus)
+	
 	if !a.focused || timeSinceFocus > 2*time.Second {
-		slog.Warn("Paste operation blocked due to focus loss", "focused", a.focused, "timeSinceFocus", timeSinceFocus)
+		slog.Error("=== PASTE BLOCKED DUE TO FOCUS LOSS ===", "focused", a.focused, "timeSinceFocus", timeSinceFocus)
 		
 		// Try to regain focus and show user feedback
 		a.input.Focus()
 		a.focused = true
 		a.lastFocusTime = time.Now()
 		
+		// Force update the presentation to show focus warning
+		a.updateStatePresentation()
+		
 		// Return without attempting clipboard operation to prevent freeze
 		return a, nil
 	}
+	
+	slog.Warn("Focus OK - proceeding with clipboard operation")
 	
 	// Ensure input is focused before clipboard operation
 	a.input.Focus()
@@ -190,6 +208,8 @@ func (a *APIKeyInput) handleSafePaste() (tea.Model, tea.Cmd) {
 	
 	resultChan := make(chan clipboardResult, 1)
 	
+	slog.Warn("Starting clipboard read operation in goroutine")
+	
 	// Run clipboard operation in goroutine with timeout
 	go func() {
 		defer func() {
@@ -200,12 +220,14 @@ func (a *APIKeyInput) handleSafePaste() (tea.Model, tea.Cmd) {
 		}()
 		
 		content, err := clipboard.ReadAll()
+		slog.Warn("Clipboard read completed", "err", err, "contentLength", len(content))
 		resultChan <- clipboardResult{content: content, err: err}
 	}()
 	
 	// Wait for result with timeout
 	select {
 	case result := <-resultChan:
+		slog.Warn("Clipboard read result received", "err", result.err)
 		if result.err != nil {
 			slog.Error("Failed to read clipboard", "error", result.err)
 			return a, nil
@@ -219,7 +241,7 @@ func (a *APIKeyInput) handleSafePaste() (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		
-		slog.Debug("Successfully read from clipboard", "length", len(clipboardContent))
+		slog.Warn("Successfully read from clipboard", "length", len(clipboardContent))
 		
 		// Safely set the value in textinput
 		currentValue := a.input.Value()
@@ -232,11 +254,12 @@ func (a *APIKeyInput) handleSafePaste() (tea.Model, tea.Cmd) {
 		// Move cursor to end of pasted content
 		a.input.SetCursor(cursorPos + len(clipboardContent))
 		
+		slog.Warn("Paste operation completed successfully")
 		return a, nil
 		
 	case <-time.After(1 * time.Second):
 		// Timeout - prevent freeze
-		slog.Warn("Clipboard operation timed out, preventing freeze")
+		slog.Error("=== CLIPBOARD OPERATION TIMED OUT - PREVENTING FREEZE ===")
 		return a, nil
 	}
 }
