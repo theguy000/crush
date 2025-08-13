@@ -111,6 +111,24 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u, cmd := m.apiKeyInput.Update(msg)
 		m.apiKeyInput = u.(*APIKeyInput)
 		return m, cmd
+	case tea.FocusMsg:
+		// Handle focus gained - ensure API key input gets focus if needed
+		if m.needsAPIKey {
+			u, cmd := m.apiKeyInput.Update(msg)
+			m.apiKeyInput = u.(*APIKeyInput)
+			return m, cmd
+		}
+		return m, nil
+		
+	case tea.BlurMsg:
+		// Handle focus lost - propagate to components
+		if m.needsAPIKey {
+			u, cmd := m.apiKeyInput.Update(msg)
+			m.apiKeyInput = u.(*APIKeyInput)
+			return m, cmd
+		}
+		return m, nil
+		
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keyMap.Select):
