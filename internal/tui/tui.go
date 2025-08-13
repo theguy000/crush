@@ -36,8 +36,11 @@ import (
 
 var lastMouseEvent time.Time
 
+// enableMouseClicksMsg is used to ensure mouse clicks are properly initialized
+type enableMouseClicksMsg struct{}
+
 func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
-	switch msg.(type) {
+	switch msg := msg.(type) {
 	case tea.MouseWheelMsg, tea.MouseMotionMsg:
 		now := time.Now()
 		// trackpad is sending too many requests
@@ -45,6 +48,10 @@ func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
 			return nil
 		}
 		lastMouseEvent = now
+	case tea.MouseClickMsg:
+		// Always allow mouse clicks through - no throttling
+		// This ensures Windows Terminal clicks are not filtered out
+		return msg
 	}
 	return msg
 }
@@ -85,6 +92,11 @@ func (a appModel) Init() tea.Cmd {
 	cmds = append(cmds, cmd)
 
 	cmds = append(cmds, tea.EnableMouseAllMotion)
+
+	// Additional mouse initialization for Windows Terminal compatibility
+	cmds = append(cmds, func() tea.Msg {
+		return enableMouseClicksMsg{}
+	})
 
 	return tea.Batch(cmds...)
 }
@@ -263,11 +275,17 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.pages[a.currentPage] = updated.(util.Model)
 		cmds = append(cmds, pageCmd)
 		return a, tea.Batch(cmds...)
+	// Mouse initialization message for Windows Terminal compatibility
+	case enableMouseClicksMsg:
+		// This message ensures mouse events are properly initialized
+		// No additional action needed, just acknowledging the initialization
+		return a, nil
+
 	// Key Press Messages
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
 
-	case tea.MouseWheelMsg:
+	case tea.MouseWheelMsg, tea.MouseClickMsg, tea.MouseMotionMsg:
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)
 			a.dialog = u.(dialogs.DialogCmp)

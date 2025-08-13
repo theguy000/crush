@@ -65,7 +65,7 @@ crush -y
 			tui.New(app),
 			tea.WithAltScreen(),
 			tea.WithContext(cmd.Context()),
-			tea.WithMouseCellMotion(),            // Use cell motion instead of all motion to reduce event flooding
+			tea.WithMouseAllMotion(),             // Use all motion mouse mode for better Windows Terminal compatibility
 			tea.WithFilter(tui.MouseEventFilter), // Filter mouse events based on focus state
 		)
 
