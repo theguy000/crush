@@ -35,8 +35,10 @@ type MultiEditPermissionsParams struct {
 }
 
 type MultiEditResponseMetadata struct {
+	Diff         string `json:"diff"`
 	Additions    int    `json:"additions"`
 	Removals     int    `json:"removals"`
+	FilePath     string `json:"file_path"`
 	OldContent   string `json:"old_content,omitempty"`
 	NewContent   string `json:"new_content,omitempty"`
 	EditsApplied int    `json:"edits_applied"`
@@ -249,7 +251,7 @@ func (m *multiEditTool) processMultiEditWithCreation(ctx context.Context, params
 	}
 
 	// Check permissions
-	_, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
+	generatedDiff, additions, removals := diff.GenerateDiff("", currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
 
 	p := m.permissions.Request(permission.CreatePermissionRequest{
 		SessionID:   sessionID,
@@ -291,10 +293,12 @@ func (m *multiEditTool) processMultiEditWithCreation(ctx context.Context, params
 	return WithResponseMetadata(
 		NewTextResponse(fmt.Sprintf("File created with %d edits: %s", len(params.Edits), params.FilePath)),
 		MultiEditResponseMetadata{
-			OldContent:   "",
-			NewContent:   currentContent,
+			Diff:         generatedDiff,
 			Additions:    additions,
 			Removals:     removals,
+			FilePath:     params.FilePath,
+			OldContent:   "",
+			NewContent:   currentContent,
 			EditsApplied: len(params.Edits),
 		},
 	), nil
@@ -359,7 +363,7 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 	}
 
 	// Generate diff and check permissions
-	_, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
+	generatedDiff, additions, removals := diff.GenerateDiff(oldContent, currentContent, strings.TrimPrefix(params.FilePath, m.workingDir))
 	p := m.permissions.Request(permission.CreatePermissionRequest{
 		SessionID:   sessionID,
 		Path:        fsext.PathOrPrefix(params.FilePath, m.workingDir),
@@ -411,10 +415,12 @@ func (m *multiEditTool) processMultiEditExistingFile(ctx context.Context, params
 	return WithResponseMetadata(
 		NewTextResponse(fmt.Sprintf("Applied %d edits to file: %s", len(params.Edits), params.FilePath)),
 		MultiEditResponseMetadata{
-			OldContent:   oldContent,
-			NewContent:   currentContent,
+			Diff:         generatedDiff,
 			Additions:    additions,
 			Removals:     removals,
+			FilePath:     params.FilePath,
+			OldContent:   oldContent,
+			NewContent:   currentContent,
 			EditsApplied: len(params.Edits),
 		},
 	), nil
