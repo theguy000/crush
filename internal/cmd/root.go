@@ -63,21 +63,23 @@ crush -y
 		defer app.Shutdown()
 
 		// Set up the TUI with Windows Terminal specific configuration
-		var mouseOption tea.ProgramOption
+		var programOptions []tea.ProgramOption
+		programOptions = append(programOptions, tea.WithAltScreen())
+		programOptions = append(programOptions, tea.WithContext(cmd.Context()))
+		
 		if isWindowsTerminal() {
-			// Windows Terminal works better with basic mouse mode
-			mouseOption = tea.WithMouseCellMotion()
+			// Windows Terminal has mouse issues - disable mouse entirely for now
+			// Focus on keyboard navigation which works reliably
+			programOptions = append(programOptions, tea.WithFilter(tui.WindowsTerminalFilter))
 		} else {
-			// Other terminals can use more advanced mouse modes
-			mouseOption = tea.WithMouseCellMotion()
+			// Other terminals can use mouse support
+			programOptions = append(programOptions, tea.WithMouseCellMotion())
+			programOptions = append(programOptions, tea.WithFilter(tui.MouseEventFilter))
 		}
 
 		program := tea.NewProgram(
 			tui.New(app),
-			tea.WithAltScreen(),
-			tea.WithContext(cmd.Context()),
-			mouseOption,
-			tea.WithFilter(tui.MouseEventFilter), // Filter mouse events based on focus state
+			programOptions...,
 		)
 
 		go app.Subscribe(program)

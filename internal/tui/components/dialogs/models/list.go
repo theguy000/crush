@@ -2,6 +2,8 @@ package models
 
 import (
 	"fmt"
+	"os"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -21,13 +23,29 @@ type ModelListComponent struct {
 	providers []catwalk.Provider
 }
 
+// isWindowsTerminal detects if we're running in Windows Terminal
+func isWindowsTerminal() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	
+	wtSession := os.Getenv("WT_SESSION")
+	termProgram := strings.ToLower(os.Getenv("TERM_PROGRAM"))
+	
+	return wtSession != "" || termProgram == "vscode" || strings.Contains(termProgram, "terminal")
+}
+
 func NewModelListComponent(keyMap list.KeyMap, inputPlaceholder string, shouldResize bool) *ModelListComponent {
 	t := styles.CurrentTheme()
 	inputStyle := t.S().Base.PaddingLeft(1).PaddingBottom(1)
 	options := []list.ListOption{
 		list.WithKeyMap(keyMap),
 		list.WithWrapNavigation(),
-		list.WithEnableMouse(),
+	}
+	
+	// Only enable mouse for non-Windows Terminal environments
+	if !isWindowsTerminal() {
+		options = append(options, list.WithEnableMouse())
 	}
 	if shouldResize {
 		options = append(options, list.WithResizeByList())

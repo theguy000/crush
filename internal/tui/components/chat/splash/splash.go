@@ -3,6 +3,7 @@ package splash
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -48,6 +49,18 @@ const (
 
 	LogoGap = 6
 )
+
+// isWindowsTerminalSplash detects if we're running in Windows Terminal
+func isWindowsTerminalSplash() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	
+	wtSession := os.Getenv("WT_SESSION")
+	termProgram := strings.ToLower(os.Getenv("TERM_PROGRAM"))
+	
+	return wtSession != "" || termProgram == "vscode" || strings.Contains(termProgram, "terminal")
+}
 
 // OnboardingCompleteMsg is sent when onboarding is complete
 type (
@@ -301,31 +314,35 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.apiKeyInput = u.(*models.APIKeyInput)
 			return s, cmd
 		} else if s.isOnboarding {
-			// Adjust mouse coordinates for the model list position within the splash layout
-			if clickMsg, ok := msg.(tea.MouseClickMsg); ok {
-				// Calculate the offset: logo height + title + padding
-				logoHeight := lipgloss.Height(s.logoRendered)
-				titleHeight := 2 // "Choose a Model" + empty line
-				offset := logoHeight + titleHeight
-				
-				// Only process clicks within the model list area
-				if clickMsg.Y >= offset {
-					adjustedMsg := tea.MouseClickMsg{
-						X:      clickMsg.X,
-						Y:      clickMsg.Y - offset,
-						Button: clickMsg.Button,
+			// Only handle mouse events if not in Windows Terminal
+			if !isWindowsTerminalSplash() {
+				// Adjust mouse coordinates for the model list position within the splash layout
+				if clickMsg, ok := msg.(tea.MouseClickMsg); ok {
+					// Calculate the offset: logo height + title + padding
+					logoHeight := lipgloss.Height(s.logoRendered)
+					titleHeight := 2 // "Choose a Model" + empty line
+					offset := logoHeight + titleHeight
+					
+					// Only process clicks within the model list area
+					if clickMsg.Y >= offset {
+						adjustedMsg := tea.MouseClickMsg{
+							X:      clickMsg.X,
+							Y:      clickMsg.Y - offset,
+							Button: clickMsg.Button,
+						}
+						u, cmd := s.modelList.Update(adjustedMsg)
+						s.modelList = u
+						return s, cmd
 					}
-					u, cmd := s.modelList.Update(adjustedMsg)
-					s.modelList = u
-					return s, cmd
+					// Click was outside model list area, ignore
+					return s, nil
 				}
-				// Click was outside model list area, ignore
-				return s, nil
+				// For wheel events, forward directly (they work differently)
+				u, cmd := s.modelList.Update(msg)
+				s.modelList = u
+				return s, cmd
 			}
-			// For wheel events, forward directly (they work differently)
-			u, cmd := s.modelList.Update(msg)
-			s.modelList = u
-			return s, cmd
+			// In Windows Terminal, ignore all mouse events
 		}
 	}
 	return s, nil
@@ -469,10 +486,19 @@ func (s *splashCmp) View() string {
 	} else if s.isOnboarding {
 		modelListView := s.modelList.View()
 		remainingHeight := s.height - lipgloss.Height(s.logoRendered) - (SplashScreenPaddingY * 2)
+		
+		// Show different instructions for Windows Terminal
+		var titleText string
+		if isWindowsTerminalSplash() {
+			titleText = "Choose a Model (Use ↑↓ Arrow Keys, Enter to Select)"
+		} else {
+			titleText = "Choose a Model"
+		}
+		
 		modelSelector := t.S().Base.AlignVertical(lipgloss.Bottom).Height(remainingHeight).Render(
 			lipgloss.JoinVertical(
 				lipgloss.Left,
-				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render("Choose a Model"),
+				t.S().Base.PaddingLeft(1).Foreground(t.Primary).Render(titleText),
 				"",
 				modelListView,
 			),

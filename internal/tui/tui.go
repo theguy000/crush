@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,8 +38,18 @@ import (
 
 var lastMouseEvent time.Time
 
-// enableMouseClicksMsg is used to ensure mouse clicks are properly initialized
-type enableMouseClicksMsg struct{}
+// isWindowsTerminalEnv detects if we're running in Windows Terminal (same as cmd/root.go)
+func isWindowsTerminalEnv() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	
+	// Check for Windows Terminal environment variables
+	wtSession := os.Getenv("WT_SESSION")
+	termProgram := strings.ToLower(os.Getenv("TERM_PROGRAM"))
+	
+	return wtSession != "" || termProgram == "vscode" || strings.Contains(termProgram, "terminal")
+}
 
 func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
 	switch msg := msg.(type) {
@@ -52,6 +64,17 @@ func MouseEventFilter(m tea.Model, msg tea.Msg) tea.Msg {
 		// Always allow mouse clicks through - no throttling
 		// This ensures Windows Terminal clicks are not filtered out
 		return msg
+	}
+	return msg
+}
+
+// WindowsTerminalFilter blocks all mouse events for Windows Terminal compatibility
+func WindowsTerminalFilter(m tea.Model, msg tea.Msg) tea.Msg {
+	switch msg.(type) {
+	case tea.MouseWheelMsg, tea.MouseMotionMsg, tea.MouseClickMsg:
+		// Block all mouse events in Windows Terminal
+		// Use keyboard navigation instead
+		return nil
 	}
 	return msg
 }
@@ -91,12 +114,10 @@ func (a appModel) Init() tea.Cmd {
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
 
-	cmds = append(cmds, tea.EnableMouseCellMotion)
-
-	// Additional mouse initialization for Windows Terminal compatibility
-	cmds = append(cmds, func() tea.Msg {
-		return enableMouseClicksMsg{}
-	})
+	// Only enable mouse for non-Windows Terminal environments  
+	if !isWindowsTerminalEnv() {
+		cmds = append(cmds, tea.EnableMouseCellMotion)
+	}
 
 	return tea.Batch(cmds...)
 }
@@ -275,12 +296,6 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.pages[a.currentPage] = updated.(util.Model)
 		cmds = append(cmds, pageCmd)
 		return a, tea.Batch(cmds...)
-	// Mouse initialization message for Windows Terminal compatibility
-	case enableMouseClicksMsg:
-		// This message ensures mouse events are properly initialized
-		// No additional action needed, just acknowledging the initialization
-		return a, nil
-
 	// Key Press Messages
 	case tea.KeyPressMsg:
 		return a, a.handleKeyPressMsg(msg)
