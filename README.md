@@ -117,18 +117,7 @@ The quickest way to get started is to grab an API key for your preferred
 provider such as Anthropic, OpenAI, Groq, or OpenRouter and just start
 Crush. You'll be prompted to enter your API key.
 
-**💡 Recommended:** Set environment variables for your preferred providers to avoid manual API key entry and potential clipboard issues:
-
-```bash
-# For Groq/Grok (recommended for getting started)
-export GROQ_API_KEY=your_api_key_here
-
-# For other providers
-export ANTHROPIC_API_KEY=your_api_key_here
-export OPENAI_API_KEY=your_api_key_here
-```
-
-### Environment Variables
+That said, you can also set environment variables for preferred providers.
 
 | Environment Variable       | Provider                                           |
 | -------------------------- | -------------------------------------------------- |
@@ -145,13 +134,6 @@ export OPENAI_API_KEY=your_api_key_here
 | `AZURE_OPENAI_ENDPOINT`    | Azure OpenAI models                                |
 | `AZURE_OPENAI_API_KEY`     | Azure OpenAI models (optional when using Entra ID) |
 | `AZURE_OPENAI_API_VERSION` | Azure OpenAI models                                |
-
-### Troubleshooting
-
-**Clipboard Issues on Linux:** If Crush crashes when pasting API keys with `Ctrl+V`, try these alternatives:
-- Use `Ctrl+Shift+V` or `Shift+Insert` to paste
-- Set the API key as an environment variable (recommended)
-- Type the API key manually if other methods fail
 
 ### By the Way
 
