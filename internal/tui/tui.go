@@ -265,6 +265,15 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 	// Key Press Messages
 	case tea.KeyPressMsg:
+		// Handle Ctrl+V specifically for better paste reliability
+		if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+v"))) {
+			if a.dialog.HasDialogs() {
+				u, dialogCmd := a.dialog.Update(msg)
+				a.dialog = u.(dialogs.DialogCmp)
+				cmds = append(cmds, dialogCmd)
+				return a, tea.Batch(cmds...)
+			}
+		}
 		return a, a.handleKeyPressMsg(msg)
 
 	case tea.MouseWheelMsg:
@@ -279,6 +288,7 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 	case tea.PasteMsg:
+		// Handle paste events with better error recovery
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)
 			a.dialog = u.(dialogs.DialogCmp)

@@ -111,6 +111,16 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.apiKeyInput = u.(*APIKeyInput)
 		return m, cmd
 	case tea.KeyPressMsg:
+		// Handle Ctrl+V specifically for better paste reliability
+		if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+v"))) {
+			if m.needsAPIKey {
+				// Ensure the API key input is focused
+				m.apiKeyInput.EnsureFocus()
+				
+				// Use the safe paste method
+				return m, m.apiKeyInput.SafePaste()
+			}
+		}
 		switch {
 		case key.Matches(msg, m.keyMap.Select):
 			if m.isAPIKeyValid {

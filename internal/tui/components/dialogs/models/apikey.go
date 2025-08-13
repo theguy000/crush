@@ -2,8 +2,11 @@ package models
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
+	"github.com/atotto/clipboard"
+	"github.com/charmbracelet/bubbles/v2/key"
 	"github.com/charmbracelet/bubbles/v2/spinner"
 	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -44,6 +47,9 @@ func NewAPIKeyInput() *APIKeyInput {
 	ti.Prompt = "> "
 	ti.SetStyles(t.S().TextInput)
 	ti.Focus()
+	
+	// Configure textinput for better paste handling
+	ti.CharLimit = 0 // No character limit for API keys
 
 	return &APIKeyInput{
 		input: ti,
@@ -77,6 +83,49 @@ func (a *APIKeyInput) Init() tea.Cmd {
 
 func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.KeyPressMsg:
+		// Handle Ctrl+V specifically for better paste reliability
+		if key.Matches(msg, key.NewBinding(key.WithKeys("ctrl+v"))) {
+			log.Printf("DEBUG: Ctrl+V detected in API key input")
+			if a.state == APIKeyInputStateInitial {
+				// Ensure the input is focused
+				a.input.Focus()
+				
+				// Read from clipboard directly
+				if clipboardText, err := clipboard.ReadAll(); err == nil && clipboardText != "" {
+					log.Printf("DEBUG: Clipboard content read successfully, length: %d", len(clipboardText))
+									// Create a paste message with the clipboard content
+				pasteMsg := tea.PasteMsg(clipboardText)
+				var cmd tea.Cmd
+				a.input, cmd = a.input.Update(pasteMsg)
+					return a, cmd
+				} else {
+					log.Printf("DEBUG: Failed to read clipboard: %v", err)
+				}
+			}
+			return a, nil
+		}
+	case tea.PasteMsg:
+		log.Printf("DEBUG: Paste message received, text length: %d", len(string(msg)))
+		// Handle paste events with better error recovery
+		if a.state == APIKeyInputStateInitial {
+			// Ensure the input is focused before pasting
+			a.input.Focus()
+			
+			// Try to get clipboard content as fallback
+			if string(msg) == "" {
+				if clipboardText, err := clipboard.ReadAll(); err == nil && clipboardText != "" {
+					log.Printf("DEBUG: Using fallback clipboard content, length: %d", len(clipboardText))
+					msg = tea.PasteMsg(clipboardText)
+				}
+			}
+			
+			// Update the input with the pasted text
+			var cmd tea.Cmd
+			a.input, cmd = a.input.Update(msg)
+			return a, cmd
+		}
+		return a, nil
 	case spinner.TickMsg:
 		if a.state == APIKeyInputStateVerifying {
 			var cmd tea.Cmd
@@ -199,4 +248,38 @@ func (a *APIKeyInput) Reset() {
 	a.input.SetValue("")
 	a.input.Focus()
 	a.updateStatePresentation()
+}
+
+// EnsureFocus ensures the input maintains focus and handles any focus-related issues
+func (a *APIKeyInput) EnsureFocus() {
+	if a.state == APIKeyInputStateInitial {
+		a.input.Focus()
+	}
+}
+
+// SafePaste attempts to paste content safely with error recovery
+func (a *APIKeyInput) SafePaste() tea.Cmd {
+	return func() tea.Msg {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("DEBUG: Recovered from panic in SafePaste: %v", r)
+			}
+		}()
+		
+		// Ensure we're in the right state
+		if a.state != APIKeyInputStateInitial {
+			return nil
+		}
+		
+		// Try to read from clipboard
+		clipboardText, err := clipboard.ReadAll()
+		if err != nil {
+			log.Printf("DEBUG: SafePaste failed to read clipboard: %v", err)
+			// Return an error message that can be handled
+			return tea.PasteMsg("")
+		}
+		
+		log.Printf("DEBUG: SafePaste successful, content length: %d", len(clipboardText))
+		return tea.PasteMsg(clipboardText)
+	}
 }
