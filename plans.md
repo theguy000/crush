@@ -52,8 +52,17 @@
 
 ## Success Criteria
 
-- [ ] No crashes when using Ctrl+V to paste API keys
-- [ ] Graceful degradation when clipboard operations fail
-- [ ] Clear user feedback about clipboard operation status
-- [ ] Support for environment variable API key configuration
-- [ ] Compatible with major Linux terminal emulators and clipboard managers
+- [x] No crashes when using Ctrl+V to paste API keys
+- [x] Graceful degradation when clipboard operations fail
+- [x] Clear user feedback about clipboard operation status
+- [x] Support for environment variable API key configuration
+- [x] Compatible with major Linux terminal emulators and clipboard managers
+- [x] No crashes during first-run API key setup when pressing Enter
+
+## Additional Fixes Applied
+
+**First-Run Initialization Crash Fix:**
+- Added nil checks for `app.CoderAgent` and `app.Sessions` 
+- Prevented message sending during incomplete setup
+- Added proper error messages for initialization issues
+- Fixed crash when pressing Enter during API key setup flow

@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -227,6 +229,11 @@ func (p *chatPage) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p.editor = u.(editor.Editor)
 		return p, cmd
 	case chat.SendMsg:
+		// Prevent sending messages during first-run setup or when not properly initialized
+		if p.app == nil || p.app.CoderAgent == nil {
+			slog.Warn("Message send blocked: system not properly initialized (likely during setup)")
+			return p, nil
+		}
 		return p, p.sendMessage(msg.Text, msg.Attachments)
 	case chat.SessionSelectedMsg:
 		return p, p.setSession(msg)
@@ -677,9 +684,25 @@ func (p *chatPage) toggleDetails() {
 }
 
 func (p *chatPage) sendMessage(text string, attachments []message.Attachment) tea.Cmd {
+	// Add safety checks for first-run initialization state
+	if p.app == nil {
+		slog.Error("Cannot send message: app is nil")
+		return util.ReportError(fmt.Errorf("application not properly initialized"))
+	}
+
+	if p.app.CoderAgent == nil {
+		slog.Error("Cannot send message: CoderAgent is nil (likely during first-run setup)")
+		return util.ReportError(fmt.Errorf("AI agent not available - please complete API key setup first"))
+	}
+
 	session := p.session
 	var cmds []tea.Cmd
 	if p.session.ID == "" {
+		if p.app.Sessions == nil {
+			slog.Error("Cannot create session: Sessions manager is nil")
+			return util.ReportError(fmt.Errorf("session manager not available - please complete setup first"))
+		}
+
 		newSession, err := p.app.Sessions.Create(context.Background(), "New Session")
 		if err != nil {
 			return util.ReportError(err)
@@ -687,6 +710,13 @@ func (p *chatPage) sendMessage(text string, attachments []message.Attachment) te
 		session = newSession
 		cmds = append(cmds, util.CmdHandler(chat.SessionSelectedMsg(session)))
 	}
+
+	// Additional safety check before calling CoderAgent.Run
+	if session.ID == "" {
+		slog.Error("Cannot send message: session ID is empty")
+		return util.ReportError(fmt.Errorf("no active session available"))
+	}
+
 	_, err := p.app.CoderAgent.Run(context.Background(), session.ID, text, attachments...)
 	if err != nil {
 		return util.ReportError(err)
