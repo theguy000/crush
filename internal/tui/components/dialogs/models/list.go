@@ -27,6 +27,7 @@ func NewModelListComponent(keyMap list.KeyMap, inputPlaceholder string, shouldRe
 	options := []list.ListOption{
 		list.WithKeyMap(keyMap),
 		list.WithWrapNavigation(),
+		list.WithEnableMouse(),
 	}
 	if shouldResize {
 		options = append(options, list.WithResizeByList())

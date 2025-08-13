@@ -223,6 +223,11 @@ func (l *list[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return l.handleMouseWheel(msg)
 		}
 		return l, nil
+	case tea.MouseClickMsg:
+		if l.enableMouse {
+			return l.handleMouseClick(msg)
+		}
+		return l, nil
 	case anim.StepMsg:
 		var cmds []tea.Cmd
 		for _, item := range slices.Collect(l.items.Seq()) {
@@ -285,6 +290,35 @@ func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		cmd = l.MoveUp(ViewportDefaultScrollSize)
 	}
 	return l, cmd
+}
+
+func (l *list[T]) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
+		return l, nil
+	}
+
+	// Convert click position to relative position within the list
+	clickY := msg.Y
+	
+	// Find which item was clicked based on the rendered item positions
+	for _, item := range slices.Collect(l.items.Seq()) {
+		renderedItem, ok := l.renderedItems.Get(item.ID())
+		if !ok {
+			continue
+		}
+		
+		// Check if the click is within this item's vertical range
+		// Account for the offset when checking position
+		itemStart := renderedItem.start - l.offset
+		itemEnd := renderedItem.end - l.offset
+		
+		if clickY >= itemStart && clickY <= itemEnd {
+			// Item was clicked, select it
+			return l, l.SetSelected(item.ID())
+		}
+	}
+	
+	return l, nil
 }
 
 // selectionView renders the highlighted selection in the view and returns it

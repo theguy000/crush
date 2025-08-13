@@ -236,6 +236,16 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u, cmd := m.apiKeyInput.Update(msg)
 		m.apiKeyInput = u.(*APIKeyInput)
 		return m, cmd
+	case tea.MouseClickMsg, tea.MouseWheelMsg:
+		if m.needsAPIKey {
+			u, cmd := m.apiKeyInput.Update(msg)
+			m.apiKeyInput = u.(*APIKeyInput)
+			return m, cmd
+		} else {
+			u, cmd := m.modelList.Update(msg)
+			m.modelList = u
+			return m, cmd
+		}
 	}
 	return m, nil
 }

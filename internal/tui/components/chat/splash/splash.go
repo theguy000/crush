@@ -295,6 +295,16 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		u, cmd := s.apiKeyInput.Update(msg)
 		s.apiKeyInput = u.(*models.APIKeyInput)
 		return s, cmd
+	case tea.MouseClickMsg, tea.MouseWheelMsg:
+		if s.needsAPIKey {
+			u, cmd := s.apiKeyInput.Update(msg)
+			s.apiKeyInput = u.(*models.APIKeyInput)
+			return s, cmd
+		} else if s.isOnboarding {
+			u, cmd := s.modelList.Update(msg)
+			s.modelList = u
+			return s, cmd
+		}
 	}
 	return s, nil
 }

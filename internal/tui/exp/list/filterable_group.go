@@ -98,6 +98,49 @@ func (f *filterableGroupList[T]) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return f, tea.Batch(cmds...)
 			}
 		}
+	case tea.MouseClickMsg:
+		if !f.inputHidden {
+			// Adjust mouse coordinates to account for the input field above the list
+			inputHeight := lipgloss.Height(f.inputStyle.Render(f.input.View()))
+			if msg.Y >= inputHeight {
+				// Click is on the list, adjust Y coordinate
+				adjustedMsg := tea.MouseClickMsg{
+					X:      msg.X,
+					Y:      msg.Y - inputHeight,
+					Button: msg.Button,
+				}
+				u, cmd := f.groupedList.Update(adjustedMsg)
+				f.groupedList = u.(*groupedList[T])
+				return f, cmd
+			}
+			// Click is on the input field, let it handle normally
+			var cmds []tea.Cmd
+			var cmd tea.Cmd
+			f.input, cmd = f.input.Update(msg)
+			cmds = append(cmds, cmd)
+			return f, tea.Batch(cmds...)
+		}
+		// Input is hidden, forward directly to list
+		u, cmd := f.groupedList.Update(msg)
+		f.groupedList = u.(*groupedList[T])
+		return f, cmd
+	case tea.MouseWheelMsg:
+		if !f.inputHidden {
+			// For wheel events, we always want to scroll the list, not the input
+			inputHeight := lipgloss.Height(f.inputStyle.Render(f.input.View()))
+			adjustedMsg := tea.MouseWheelMsg{
+				X:      msg.X,
+				Y:      msg.Y - inputHeight,
+				Button: msg.Button,
+			}
+			u, cmd := f.groupedList.Update(adjustedMsg)
+			f.groupedList = u.(*groupedList[T])
+			return f, cmd
+		}
+		// Input is hidden, forward directly to list
+		u, cmd := f.groupedList.Update(msg)
+		f.groupedList = u.(*groupedList[T])
+		return f, cmd
 	}
 	u, cmd := f.groupedList.Update(msg)
 	f.groupedList = u.(*groupedList[T])
