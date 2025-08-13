@@ -77,6 +77,42 @@ func (a *APIKeyInput) Init() tea.Cmd {
 
 func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		// Handle paste operations with robust error handling and focus management
+		if a.state == APIKeyInputStateInitial || a.state == APIKeyInputStateError {
+			// Ensure input is focused before paste
+			if !a.input.Focused() {
+				a.input.Focus()
+			}
+			
+			// Validate pasted content before processing
+			pastedContent := string(msg)
+			if len(pastedContent) == 0 {
+				// Empty paste, just return without processing
+				return a, nil
+			}
+			
+			// Safely handle paste with panic recovery
+			var cmd tea.Cmd
+			defer func() {
+				if r := recover(); r != nil {
+					// Log the panic for debugging
+					fmt.Printf("Panic during paste operation: %v\n", r)
+					// Restore focus and continue
+					a.input.Focus()
+				}
+			}()
+			
+			a.input, cmd = a.input.Update(msg)
+			
+			// Ensure focus is maintained after paste
+			if !a.input.Focused() {
+				a.input.Focus()
+			}
+			
+			return a, cmd
+		}
+		return a, nil
 	case spinner.TickMsg:
 		if a.state == APIKeyInputStateVerifying {
 			var cmd tea.Cmd
@@ -196,7 +232,23 @@ func (a *APIKeyInput) SetWidth(width int) {
 
 func (a *APIKeyInput) Reset() {
 	a.state = APIKeyInputStateInitial
-	a.input.SetValue("")
+	a.SetValue("")
 	a.input.Focus()
 	a.updateStatePresentation()
+}
+
+// Focused returns whether the input is currently focused
+func (a *APIKeyInput) Focused() bool {
+	return a.input.Focused()
+}
+
+// SetValue safely sets the input value with error handling
+func (a *APIKeyInput) SetValue(value string) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("Panic during SetValue: %v\n", r)
+			a.input.Focus()
+		}
+	}()
+	a.input.SetValue(value)
 }
