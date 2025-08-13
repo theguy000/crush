@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
@@ -223,13 +224,48 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.PasteMsg:
+		// Add defensive error handling for clipboard operations to prevent crashes
+		// particularly on Linux systems where focus loss can cause issues
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Clipboard paste operation failed", "error", r, "needsAPIKey", m.needsAPIKey)
+				// Continue execution gracefully without crashing
+			}
+		}()
+
 		if m.needsAPIKey {
-			u, cmd := m.apiKeyInput.Update(msg)
-			m.apiKeyInput = u.(*APIKeyInput)
+			// Safely handle API key input paste with error recovery
+			u, cmd := func() (tea.Model, tea.Cmd) {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("API key input paste failed", "error", r)
+						// Return current state unchanged if paste fails
+					}
+				}()
+				return m.apiKeyInput.Update(msg)
+			}()
+
+			if u != nil {
+				m.apiKeyInput = u.(*APIKeyInput)
+			}
 			return m, cmd
 		} else {
+			// Safely handle model list paste with error recovery
 			var cmd tea.Cmd
-			m.modelList, cmd = m.modelList.Update(msg)
+			newModelList, newCmd := func() (*ModelListComponent, tea.Cmd) {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("Model list paste failed", "error", r)
+						// Return current state unchanged if paste fails
+					}
+				}()
+				return m.modelList.Update(msg)
+			}()
+
+			if newModelList != nil {
+				m.modelList = newModelList
+				cmd = newCmd
+			}
 			return m, cmd
 		}
 	case spinner.TickMsg:

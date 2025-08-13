@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/spinner"
@@ -76,6 +77,15 @@ func (a *APIKeyInput) Init() tea.Cmd {
 }
 
 func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Add defensive error handling for all message processing
+	// to prevent crashes from focus loss or clipboard operations
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("APIKeyInput update failed", "error", r, "msgType", fmt.Sprintf("%T", msg))
+			// Continue execution gracefully
+		}
+	}()
+
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
 		if a.state == APIKeyInputStateVerifying {
@@ -93,10 +103,29 @@ func (a *APIKeyInput) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.updateStatePresentation()
 		return a, cmd
+	case tea.PasteMsg:
+		// Special handling for paste messages to prevent crashes
+		// Validate input focus state before processing paste
+		slog.Debug("Processing paste message in API key input", "hasValue", a.input.Value() != "")
+
+		// Ensure the input is properly focused before attempting paste
+		if a.state == APIKeyInputStateInitial || a.state == APIKeyInputStateError {
+			a.input.Focus()
+		}
 	}
 
+	// Safely update the underlying text input with error recovery
 	var cmd tea.Cmd
-	a.input, cmd = a.input.Update(msg)
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("Text input update failed", "error", r, "msgType", fmt.Sprintf("%T", msg))
+				// Keep current state if update fails
+			}
+		}()
+		a.input, cmd = a.input.Update(msg)
+	}()
+
 	return a, cmd
 }
 
@@ -148,23 +177,59 @@ func (a *APIKeyInput) View() string {
 	helpText := styles.CurrentTheme().S().Muted.
 		Render(fmt.Sprintf("This will be written to the global configuration: %s", dataPath))
 
+	// Add helpful tips for alternative input methods
+	t := styles.CurrentTheme()
+	var tips string
+	if a.state == APIKeyInputStateInitial {
+		tips = lipgloss.JoinVertical(
+			lipgloss.Left,
+			t.S().Muted.Render("💡 Tips:"),
+			t.S().Muted.Render("  • Try Ctrl+Shift+V or Shift+Insert to paste"),
+			t.S().Muted.Render(fmt.Sprintf("  • Set %s_API_KEY environment variable to skip this step", strings.ToUpper(a.providerName))),
+		)
+	}
+
 	var content string
 	if a.showTitle && a.title != "" {
-		content = lipgloss.JoinVertical(
-			lipgloss.Left,
-			a.title,
-			"",
-			inputView,
-			"",
-			helpText,
-		)
+		if tips != "" {
+			content = lipgloss.JoinVertical(
+				lipgloss.Left,
+				a.title,
+				"",
+				inputView,
+				"",
+				tips,
+				"",
+				helpText,
+			)
+		} else {
+			content = lipgloss.JoinVertical(
+				lipgloss.Left,
+				a.title,
+				"",
+				inputView,
+				"",
+				helpText,
+			)
+		}
 	} else {
-		content = lipgloss.JoinVertical(
-			lipgloss.Left,
-			inputView,
-			"",
-			helpText,
-		)
+		if tips != "" {
+			content = lipgloss.JoinVertical(
+				lipgloss.Left,
+				inputView,
+				"",
+				tips,
+				"",
+				helpText,
+			)
+		} else {
+			content = lipgloss.JoinVertical(
+				lipgloss.Left,
+				inputView,
+				"",
+				helpText,
+			)
+		}
 	}
 
 	return content
