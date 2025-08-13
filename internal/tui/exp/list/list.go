@@ -293,15 +293,48 @@ func (l *list[T]) handleMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 }
 
 func (l *list[T]) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
-	if msg.Button != tea.MouseLeft {
+	// For Windows Terminal compatibility, be more permissive with button types
+	// Windows Terminal sometimes sends different button codes
+	if msg.Button != tea.MouseLeft && msg.Button != tea.MouseRight {
 		return l, nil
 	}
 
 	// Convert click position to relative position within the list
 	clickY := msg.Y
 	
-	// Find which item was clicked based on the rendered item positions
-	for _, item := range slices.Collect(l.items.Seq()) {
+	// Simple approach: try to find the item based on basic position calculation
+	// This is more robust than relying on renderedItems positions
+	if clickY < 0 || clickY >= l.height {
+		return l, nil
+	}
+	
+	// Get visible items
+	items := slices.Collect(l.items.Seq())
+	if len(items) == 0 {
+		return l, nil
+	}
+	
+	// For simple cases, assume each item takes 1 line (+ gap)
+	// This works well for provider selection lists
+	itemHeight := 1
+	if l.gap > 0 {
+		itemHeight = 1 + l.gap
+	}
+	
+	// Calculate which item was clicked
+	clickedIndex := clickY / itemHeight
+	
+	// Account for offset
+	clickedIndex += l.offset
+	
+	// Make sure the index is valid
+	if clickedIndex >= 0 && clickedIndex < len(items) {
+		item := items[clickedIndex]
+		return l, l.SetSelected(item.ID())
+	}
+	
+	// Fallback: try the original approach with renderedItems
+	for _, item := range items {
 		renderedItem, ok := l.renderedItems.Get(item.ID())
 		if !ok {
 			continue

@@ -242,6 +242,26 @@ func (m *modelDialogCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.apiKeyInput = u.(*APIKeyInput)
 			return m, cmd
 		} else {
+			// Adjust mouse coordinates for the model list position within the dialog
+			if clickMsg, ok := msg.(tea.MouseClickMsg); ok {
+				// Account for the title height (with padding)
+				titleHeight := 1 // Title line with padding
+				
+				// Only process clicks within the model list area
+				if clickMsg.Y >= titleHeight {
+					adjustedMsg := tea.MouseClickMsg{
+						X:      clickMsg.X,
+						Y:      clickMsg.Y - titleHeight,
+						Button: clickMsg.Button,
+					}
+					u, cmd := m.modelList.Update(adjustedMsg)
+					m.modelList = u
+					return m, cmd
+				}
+				// Click was outside model list area, ignore
+				return m, nil
+			}
+			// For wheel events, forward directly
 			u, cmd := m.modelList.Update(msg)
 			m.modelList = u
 			return m, cmd

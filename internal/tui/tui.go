@@ -91,7 +91,7 @@ func (a appModel) Init() tea.Cmd {
 	cmd = a.status.Init()
 	cmds = append(cmds, cmd)
 
-	cmds = append(cmds, tea.EnableMouseAllMotion)
+	cmds = append(cmds, tea.EnableMouseCellMotion)
 
 	// Additional mouse initialization for Windows Terminal compatibility
 	cmds = append(cmds, func() tea.Msg {
@@ -286,6 +286,16 @@ func (a *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.handleKeyPressMsg(msg)
 
 	case tea.MouseWheelMsg, tea.MouseClickMsg, tea.MouseMotionMsg:
+		// Debug logging for Windows Terminal troubleshooting
+		switch msg := msg.(type) {
+		case tea.MouseClickMsg:
+			// Log mouse click for debugging
+			_ = msg // Use the variable to avoid unused variable error
+		case tea.MouseWheelMsg:
+			// Log mouse wheel for debugging  
+			_ = msg
+		}
+		
 		if a.dialog.HasDialogs() {
 			u, dialogCmd := a.dialog.Update(msg)
 			a.dialog = u.(dialogs.DialogCmp)

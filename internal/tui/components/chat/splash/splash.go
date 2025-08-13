@@ -301,6 +301,28 @@ func (s *splashCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			s.apiKeyInput = u.(*models.APIKeyInput)
 			return s, cmd
 		} else if s.isOnboarding {
+			// Adjust mouse coordinates for the model list position within the splash layout
+			if clickMsg, ok := msg.(tea.MouseClickMsg); ok {
+				// Calculate the offset: logo height + title + padding
+				logoHeight := lipgloss.Height(s.logoRendered)
+				titleHeight := 2 // "Choose a Model" + empty line
+				offset := logoHeight + titleHeight
+				
+				// Only process clicks within the model list area
+				if clickMsg.Y >= offset {
+					adjustedMsg := tea.MouseClickMsg{
+						X:      clickMsg.X,
+						Y:      clickMsg.Y - offset,
+						Button: clickMsg.Button,
+					}
+					u, cmd := s.modelList.Update(adjustedMsg)
+					s.modelList = u
+					return s, cmd
+				}
+				// Click was outside model list area, ignore
+				return s, nil
+			}
+			// For wheel events, forward directly (they work differently)
 			u, cmd := s.modelList.Update(msg)
 			s.modelList = u
 			return s, cmd

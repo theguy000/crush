@@ -6,6 +6,8 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"runtime"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/crush/internal/app"
@@ -60,12 +62,21 @@ crush -y
 		}
 		defer app.Shutdown()
 
-		// Set up the TUI.
+		// Set up the TUI with Windows Terminal specific configuration
+		var mouseOption tea.ProgramOption
+		if isWindowsTerminal() {
+			// Windows Terminal works better with basic mouse mode
+			mouseOption = tea.WithMouseCellMotion()
+		} else {
+			// Other terminals can use more advanced mouse modes
+			mouseOption = tea.WithMouseCellMotion()
+		}
+
 		program := tea.NewProgram(
 			tui.New(app),
 			tea.WithAltScreen(),
 			tea.WithContext(cmd.Context()),
-			tea.WithMouseAllMotion(),             // Use all motion mouse mode for better Windows Terminal compatibility
+			mouseOption,
 			tea.WithFilter(tui.MouseEventFilter), // Filter mouse events based on focus state
 		)
 
@@ -88,6 +99,19 @@ func Execute() {
 	); err != nil {
 		os.Exit(1)
 	}
+}
+
+// isWindowsTerminal detects if we're running in Windows Terminal
+func isWindowsTerminal() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	
+	// Check for Windows Terminal environment variables
+	wtSession := os.Getenv("WT_SESSION")
+	termProgram := strings.ToLower(os.Getenv("TERM_PROGRAM"))
+	
+	return wtSession != "" || termProgram == "vscode" || strings.Contains(termProgram, "terminal")
 }
 
 // setupApp handles the common setup logic for both interactive and non-interactive modes.
